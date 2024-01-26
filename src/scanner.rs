@@ -102,7 +102,6 @@ impl Scanner<'_> {
             '"' => return self.string(),
             _ if Self::is_digit(c) => return self.digit(),
             _ if Self::is_alpha(c) => return self.identifier(),
-
             _ => self.error_token("unfinished"),
         }
     }
@@ -186,10 +185,10 @@ impl Scanner<'_> {
     }
 
     fn digit(&mut self) -> Token {
-        while self.peek().is_some_and(|c| Self::is_digit(c)) {
+        while self.peek().is_some_and(Self::is_digit) {
             self.advance();
         }
-        if self.peek() == Some('.') && self.peek_next().is_some_and(|c| Self::is_digit(c)) {
+        if self.peek() == Some('.') && self.peek_next().is_some_and(Self::is_digit) {
             // Consume .
             self.advance();
             while self.peek() >= Some('0') && self.peek() <= Some('9') {
@@ -229,11 +228,11 @@ impl Scanner<'_> {
     }
 
     fn is_digit(c: char) -> bool {
-        c >= '0' && c <= '9'
+        c.is_ascii()
     }
 
     fn is_alpha(c: char) -> bool {
-        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+        c.is_ascii_lowercase() || c.is_ascii_uppercase() || c == '_'
     }
 
     fn peek(&self) -> Option<char> {
