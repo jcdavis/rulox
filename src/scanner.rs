@@ -1,13 +1,15 @@
 
-use std::iter::Peekable;
-use std::str::Chars;
+use std::{str::Chars, collections::HashMap};
 
 pub struct Scanner<'a> {
-    source: Peekable<Chars<'a>>,
+    source: Chars<'a>,
+    current: Option<char>,
+    next: Option<char>,
     buffer: String,
     line: u32,
 }
 
+#[derive(Copy, Clone)]
 pub enum TokenType {
   // Single-character tokens.
   TOKEN_LEFT_PAREN,TOKEN_RIGHT_PAREN,
@@ -38,8 +40,13 @@ pub struct Token {
 
 impl Scanner<'_> {
     pub fn new(source_str: &str) -> Scanner {
+        let mut chars = source_str.chars();
+        let current = chars.next();
+        let next = chars.next();
         Scanner {
-            source: source_str.chars().peekable(),
+            source: chars,
+            current,
+            next,
             buffer: String::new(),
             line: 1,
         }
@@ -92,15 +99,19 @@ impl Scanner<'_> {
                     return self.make_token(TokenType::TOKEN_GREATER);
                 }
             }
+            '"' => return self.string(),
+            _ if Self::is_digit(c) => return self.digit(),
+            _ if Self::is_alpha(c) => return self.identifier(),
+
             _ => self.error_token("unfinished"),
         }
     }
 
 
     fn matches(&mut self, expected: char) -> bool {
-        match self.source.peek() {
+        match self.peek() {
             Some(c) => {
-                if expected == *c {
+                if expected == c {
                     self.source.next();
                     true
                 } else {
@@ -112,7 +123,11 @@ impl Scanner<'_> {
     }
 
     fn advance(&mut self) -> char {
-        self.source.next().expect("didn't gaurd?")
+        let unwrapped = self.current.expect("didn't gaurd?");
+        self.buffer.push(unwrapped);
+        self.current = self.next;
+        self.next = self.source.next();
+        unwrapped
     }
 
     fn make_token(&mut self, token_type: TokenType) -> Token {
@@ -132,20 +147,100 @@ impl Scanner<'_> {
         }
     }
 
-    fn is_at_end(&mut self) -> bool {
-        self.source.peek().is_none()
+    fn is_at_end(&self) -> bool {
+        self.next.is_none()
     }
 
     fn skip_whitespace(&mut self) {
         loop {
-            match self.source.peek() {
-                Some(' ') | Some('\r') | Some('\t') => self.advance(),
+            match self.peek() {
+                Some(' ') | Some('\r') | Some('\t') => {self.advance();} ,
                 Some('\n') => {
                     self.line += 1;
-                    self.advance()
+                    self.advance();
+                },
+                Some('/') if self.peek_next() == Some('/') => {
+                    while self.peek() != Some('\n') && !self.is_at_end() {
+                        self.advance();
+                    }
                 },
                 _ => break,
             };
         }
+    }
+
+    fn string(&mut self) -> Token {
+        while self.peek() != Some('"') && !self.is_at_end() {
+            if self.peek() == Some('\n') {
+                self.line += 1;
+            }
+            self.advance();
+        }
+        if self.is_at_end() {
+            self.error_token("Unterminated string")
+        } else {
+            // Closing
+            self.advance();
+            self.make_token(TokenType::TOKEN_STRING)
+        }
+    }
+
+    fn digit(&mut self) -> Token {
+        while self.peek().is_some_and(|c| Self::is_digit(c)) {
+            self.advance();
+        }
+        if self.peek() == Some('.') && self.peek_next().is_some_and(|c| Self::is_digit(c)) {
+            // Consume .
+            self.advance();
+            while self.peek() >= Some('0') && self.peek() <= Some('9') {
+                self.advance();
+            }
+        }
+        self.make_token(TokenType::TOKEN_NUMBER)
+    }
+
+    fn identifier(& mut self) -> Token {
+        while self.peek().is_some_and(|c| Self::is_digit(c) || Self::is_alpha(c)) {
+            self.advance();
+        }
+        self.make_token(self.identifier_type())
+    }
+
+    fn identifier_type(&self) -> TokenType {
+        let keywords = HashMap::from([
+            ("and", TokenType::TOKEN_AND),
+            ("class", TokenType::TOKEN_CLASS),
+            ("else", TokenType::TOKEN_ELSE),
+            ("false", TokenType::TOKEN_FALSE),
+            ("for", TokenType::TOKEN_FOR),
+            ("fun", TokenType::TOKEN_FUN),
+            ("if", TokenType::TOKEN_IF),
+            ("nil", TokenType::TOKEN_NIL),
+            ("or", TokenType::TOKEN_OR),
+            ("print", TokenType::TOKEN_PRINT),
+            ("return", TokenType::TOKEN_RETURN),
+            ("super", TokenType::TOKEN_SUPER),
+            ("this", TokenType::TOKEN_THIS),
+            ("true", TokenType::TOKEN_TRUE),
+            ("var", TokenType::TOKEN_VAR),
+            ("while", TokenType::TOKEN_WHILE)
+        ]);
+        *keywords.get(self.buffer.as_str()).unwrap_or(&TokenType::TOKEN_IDENTIFIER)
+    }
+
+    fn is_digit(c: char) -> bool {
+        c >= '0' && c <= '9'
+    }
+
+    fn is_alpha(c: char) -> bool {
+        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.current
+    }
+
+    fn peek_next(&self) -> Option<char> {
+        self.next
     }
 }
