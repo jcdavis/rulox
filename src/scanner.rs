@@ -9,7 +9,7 @@ pub struct Scanner<'a> {
     line: u32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum TokenType {
   // Single-character tokens.
   TOKEN_LEFT_PAREN,TOKEN_RIGHT_PAREN,
@@ -33,9 +33,9 @@ pub enum TokenType {
 }
 
 pub struct Token {
-    token_type: TokenType,
-    contents: String,
-    line: u32,
+    pub token_type: TokenType,
+    pub contents: String,
+    pub line: u32,
 }
 
 impl Scanner<'_> {

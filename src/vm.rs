@@ -1,17 +1,17 @@
 extern crate num;
 
-use crate::chunk;
+use crate::{chunk, compiler};
 use chunk::{Chunk, OpCode};
 
-pub struct VM {
-    chunk: Chunk,
+pub struct VM<'a> {
+    chunk: &'a Chunk,
     offset: usize,
     debug: bool,
     stack: Vec<f64>,
 }
 
-impl VM {
-    pub fn new(chunk: Chunk) -> VM {
+impl VM<'_> {
+    pub fn new(chunk: &Chunk) -> VM {
         VM {
             chunk,
             offset: 0,
@@ -24,7 +24,7 @@ impl VM {
         self.debug = true;
     }
 
-    pub fn run(&mut self) -> u8 {
+pub fn run(&mut self) -> u8 {
         loop {
             if self.debug {
                 println!("{:?}", self.stack);
