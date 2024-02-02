@@ -41,7 +41,8 @@ pub fn run(&mut self) -> u8 {
                     self.push(total);
                 }
                 OpCode::Subtract => {
-                    let total = self.pop() - self.pop();
+                    let b = self.pop();
+                    let total = self.pop() - b;
                     self.push(total);
                 }
                 OpCode::Multiply => {
@@ -49,7 +50,8 @@ pub fn run(&mut self) -> u8 {
                     self.push(total);
                 }
                 OpCode::Divide => {
-                    let total = self.pop() / self.pop();
+                    let b = self.pop();
+                    let total = self.pop() / b;
                     self.push(total);
                 }
                 OpCode::Negate => {

@@ -1,4 +1,4 @@
-use std::{mem, borrow::Borrow, cell::RefCell};
+use std::{mem, borrow::Borrow, cell::RefCell, hash::Hash, collections::HashMap};
 
 use crate::{chunk::{self, Chunk, OpCode}, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
@@ -11,6 +11,20 @@ struct Compiler<'a> {
     had_error: RefCell<bool>,
     panic_mode: RefCell<bool>,
 }
+
+type Precedence = u8;
+
+const PRECEDENCE_NONE: Precedence = 0;
+const PRECEDENCE_ASSIGNMENT: Precedence = 1;
+const PRECEDENCE_OR: Precedence = 2;
+const PRECEDENCE_AND: Precedence = 3;
+const PRECEDENCE_EQUALITY: Precedence = 4;
+const PRECEDENCE_COMPARISON: Precedence = 5;
+const PRECEDENCE_TERM: Precedence = 6;
+const PRECEDENCE_FACTOR: Precedence = 7;
+const PRECEDENCE_UNARY: Precedence = 8;
+const PRECEDENCE_CALL: Precedence = 9;
+const PRECEDENCE_PRIMARY: Precedence = 10;
 
 pub fn compile(source: &str) -> Option<Chunk> {
     let scanner = scanner::Scanner::new(source);
@@ -88,9 +102,19 @@ impl Compiler<'_> {
 
     pub fn end_compiler(&mut self) {
         self.emit_opcode(OpCode::Return);
+        self.chunk.disassemble("code");
     }
 
-    pub fn number(& mut self) {
+    pub fn expression(&mut self) {
+        self.parse_precedence(PRECEDENCE_ASSIGNMENT);
+    }
+
+    pub fn grouping(&mut self) {
+        self.expression();
+        self.consume(TokenType::TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+    }
+
+    pub fn number(&mut self) {
         let str = &self.previous.as_ref().unwrap().contents;
         let parsed = str.parse::<f64>();
         match parsed {
@@ -99,12 +123,65 @@ impl Compiler<'_> {
         }
     }
 
-    pub fn expression(&mut self) {
-
+    pub fn unary(&mut self) {
+        let operator_type = self.previous.as_ref().unwrap().token_type;
+        self.parse_precedence(PRECEDENCE_UNARY);
+        match operator_type {
+            TokenType::TOKEN_MINUS => self.emit_opcode(OpCode::Negate),
+            _ => (),
+        }
     }
 
+    pub fn binary(&mut self) {
+        let operator_type = self.previous.as_ref().unwrap().token_type;
+        let precedence = self.get_precedence(operator_type);
+        self.parse_precedence(precedence + 1); // +1 somehow
+
+        match operator_type {
+            TokenType::TOKEN_PLUS => self.emit_opcode(OpCode::Add),
+            TokenType::TOKEN_MINUS => self.emit_opcode(OpCode::Subtract),
+            TokenType::TOKEN_STAR => self.emit_opcode(OpCode::Multiply),
+            TokenType::TOKEN_SLASH => self.emit_opcode(OpCode::Divide),
+            _ => (),
+        }
+    }
+
+    pub fn parse_precedence(&mut self, precedence: Precedence) {
+        self.advance();
+        self.do_prefix(self.previous.as_ref().unwrap().token_type);
+
+        while precedence <= self.get_precedence(self.current.as_ref().unwrap().token_type) {
+            self.advance();
+            self.do_infix(self.previous.as_ref().unwrap().token_type);
+        }
+    }
+
+     pub fn do_prefix(&mut self, token_type: TokenType) {
+        match token_type {
+            TokenType::TOKEN_LEFT_PAREN => self.grouping(),
+            TokenType::TOKEN_MINUS => self.unary(),
+            TokenType::TOKEN_NUMBER => self.number(),
+            rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
+        }
+     }
+
+     pub fn do_infix(&mut self, token_type: TokenType) {
+        match token_type {
+            TokenType::TOKEN_MINUS | TokenType::TOKEN_PLUS | TokenType::TOKEN_SLASH | TokenType::TOKEN_STAR => self.binary(),
+            rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
+        }
+     }
+
+     pub fn get_precedence(&mut self, token_type: TokenType) -> Precedence {
+        match token_type {
+            TokenType::TOKEN_MINUS | TokenType::TOKEN_PLUS => PRECEDENCE_TERM,
+            TokenType::TOKEN_SLASH | TokenType::TOKEN_STAR => PRECEDENCE_FACTOR,
+            _ => PRECEDENCE_NONE,
+        }
+     }
+
     fn error_at_current(&self, message: &str) {
-       self.error_at(&self.current, message);
+        self.error_at(&self.current, message);
     }
 
     fn error(&self, message: &str) {

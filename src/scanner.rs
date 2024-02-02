@@ -9,7 +9,7 @@ pub struct Scanner<'a> {
     line: u32,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub enum TokenType {
   // Single-character tokens.
   TOKEN_LEFT_PAREN,TOKEN_RIGHT_PAREN,
@@ -32,6 +32,7 @@ pub enum TokenType {
   TOKEN_ERROR, TOKEN_EOF
 }
 
+#[derive(Debug)]
 pub struct Token {
     pub token_type: TokenType,
     pub contents: String,
@@ -54,6 +55,7 @@ impl Scanner<'_> {
 
     pub fn scan_token(&mut self) -> Token {
         self.skip_whitespace();
+        self.buffer.clear();
         if self.is_at_end() {
             return self.make_token(TokenType::TOKEN_EOF);
         }
@@ -228,7 +230,7 @@ impl Scanner<'_> {
     }
 
     fn is_digit(c: char) -> bool {
-        c.is_ascii()
+        c.is_ascii_digit()
     }
 
     fn is_alpha(c: char) -> bool {
