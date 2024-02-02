@@ -62,48 +62,48 @@ impl Scanner<'_> {
 
         let c = self.advance();
         match c {
-            '(' => return self.make_token(TokenType::TOKEN_LEFT_PAREN),
-            ')' => return self.make_token(TokenType::TOKEN_RIGHT_PAREN),
-            '{' => return self.make_token(TokenType::TOKEN_LEFT_BRACE),
-            '}' => return self.make_token(TokenType::TOKEN_RIGHT_BRACE),
-            ';' => return self.make_token(TokenType::TOKEN_SEMICOLON),
-            ',' => return self.make_token(TokenType::TOKEN_COMMA),
-            '.' => return self.make_token(TokenType::TOKEN_DOT),
-            '-' => return self.make_token(TokenType::TOKEN_MINUS),
-            '+' => return self.make_token(TokenType::TOKEN_PLUS),
-            '/' => return self.make_token(TokenType::TOKEN_SLASH),
-            '*' => return self.make_token(TokenType::TOKEN_STAR),
+            '(' => self.make_token(TokenType::TOKEN_LEFT_PAREN),
+            ')' => self.make_token(TokenType::TOKEN_RIGHT_PAREN),
+            '{' => self.make_token(TokenType::TOKEN_LEFT_BRACE),
+            '}' => self.make_token(TokenType::TOKEN_RIGHT_BRACE),
+            ';' => self.make_token(TokenType::TOKEN_SEMICOLON),
+            ',' => self.make_token(TokenType::TOKEN_COMMA),
+            '.' => self.make_token(TokenType::TOKEN_DOT),
+            '-' => self.make_token(TokenType::TOKEN_MINUS),
+            '+' => self.make_token(TokenType::TOKEN_PLUS),
+            '/' => self.make_token(TokenType::TOKEN_SLASH),
+            '*' => self.make_token(TokenType::TOKEN_STAR),
             '!' => {
                 if self.matches('=') {
-                    return self.make_token(TokenType::TOKEN_BANG_EQUAL);
+                    self.make_token(TokenType::TOKEN_BANG_EQUAL)
                 } else {
-                    return self.make_token(TokenType::TOKEN_BANG);
+                    self.make_token(TokenType::TOKEN_BANG)
                 }
             }
             '=' => {
                 if self.matches('=') {
-                    return self.make_token(TokenType::TOKEN_EQUAL_EQUAL);
+                    self.make_token(TokenType::TOKEN_EQUAL_EQUAL)
                 } else {
-                    return self.make_token(TokenType::TOKEN_EQUAL);
+                    self.make_token(TokenType::TOKEN_EQUAL)
                 }
             }
             '<' => {
                 if self.matches('=') {
-                    return self.make_token(TokenType::TOKEN_LESS_EQUAL);
+                    self.make_token(TokenType::TOKEN_LESS_EQUAL)
                 } else {
-                    return self.make_token(TokenType::TOKEN_LESS);
+                    self.make_token(TokenType::TOKEN_LESS)
                 }
             }
             '>' => {
                 if self.matches('=') {
-                    return self.make_token(TokenType::TOKEN_GREATER_EQUAL);
+                    self.make_token(TokenType::TOKEN_GREATER_EQUAL)
                 } else {
-                    return self.make_token(TokenType::TOKEN_GREATER);
+                    self.make_token(TokenType::TOKEN_GREATER)
                 }
             }
-            '"' => return self.string(),
-            _ if Self::is_digit(c) => return self.digit(),
-            _ if Self::is_alpha(c) => return self.identifier(),
+            '"' => self.string(),
+            _ if Self::is_digit(c) => self.digit(),
+            _ if Self::is_alpha(c) => self.identifier(),
             _ => self.error_token("unfinished"),
         }
     }
@@ -132,7 +132,7 @@ impl Scanner<'_> {
     }
 
     fn make_token(&mut self, token_type: TokenType) -> Token {
-        let contents = std::mem::replace(&mut self.buffer, String::new());
+        let contents = std::mem::take(&mut self.buffer);
         Token {
             token_type,
             contents,

@@ -1,4 +1,4 @@
-use std::{mem, borrow::Borrow, cell::RefCell, hash::Hash, collections::HashMap};
+use std::{borrow::Borrow, cell::RefCell};
 
 use crate::{chunk::{self, Chunk, OpCode}, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
@@ -119,7 +119,7 @@ impl Compiler<'_> {
         let parsed = str.parse::<f64>();
         match parsed {
             Ok(double) => self.emit_constant(double),
-            Err(err) => self.error(format!("Unable to parse {}", str).as_str()),
+            Err(_err) => self.error(format!("Unable to parse {}", str).as_str()),
         }
     }
 

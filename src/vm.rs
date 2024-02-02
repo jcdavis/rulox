@@ -1,6 +1,6 @@
 extern crate num;
 
-use crate::{chunk, compiler};
+use crate::{chunk};
 use chunk::{Chunk, OpCode};
 
 pub struct VM<'a> {
