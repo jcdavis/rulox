@@ -12,24 +12,24 @@ pub struct Scanner<'a> {
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub enum TokenType {
   // Single-character tokens.
-  TOKEN_LEFT_PAREN,TOKEN_RIGHT_PAREN,
-  TOKEN_LEFT_BRACE, TOKEN_RIGHT_BRACE,
-  TOKEN_COMMA, TOKEN_DOT, TOKEN_MINUS, TOKEN_PLUS,
-  TOKEN_SEMICOLON, TOKEN_SLASH, TOKEN_STAR,
+  LeftParen,RightParen,
+  LeftBrace, RightBrace,
+  Comma, Dot, Minus, Plus,
+  Semicolon, Slash, Star,
   // One or two character tokens.
-  TOKEN_BANG, TOKEN_BANG_EQUAL,
-  TOKEN_EQUAL, TOKEN_EQUAL_EQUAL,
-  TOKEN_GREATER, TOKEN_GREATER_EQUAL,
-  TOKEN_LESS, TOKEN_LESS_EQUAL,
+  Bang, BangEqual,
+  Equal, EqualEqual,
+  Greater, GreaterEqual,
+  Less, LessEqual,
   // Literals.
-  TOKEN_IDENTIFIER, TOKEN_STRING, TOKEN_NUMBER,
+  Identifier, String, Number,
   // Keywords.
-  TOKEN_AND, TOKEN_CLASS, TOKEN_ELSE, TOKEN_FALSE,
-  TOKEN_FOR, TOKEN_FUN, TOKEN_IF, TOKEN_NIL, TOKEN_OR,
-  TOKEN_PRINT, TOKEN_RETURN, TOKEN_SUPER, TOKEN_THIS,
-  TOKEN_TRUE, TOKEN_VAR, TOKEN_WHILE,
+  And, Class, Else, False,
+  For, Fun, If, Nil, Or,
+  Print, Return, Super, This,
+  True, Var, While,
 
-  TOKEN_ERROR, TOKEN_EOF
+  Error, Eof
 }
 
 #[derive(Debug)]
@@ -57,48 +57,48 @@ impl Scanner<'_> {
         self.skip_whitespace();
         self.buffer.clear();
         if self.is_at_end() {
-            return self.make_token(TokenType::TOKEN_EOF);
+            return self.make_token(TokenType::Eof);
         }
 
         let c = self.advance();
         match c {
-            '(' => self.make_token(TokenType::TOKEN_LEFT_PAREN),
-            ')' => self.make_token(TokenType::TOKEN_RIGHT_PAREN),
-            '{' => self.make_token(TokenType::TOKEN_LEFT_BRACE),
-            '}' => self.make_token(TokenType::TOKEN_RIGHT_BRACE),
-            ';' => self.make_token(TokenType::TOKEN_SEMICOLON),
-            ',' => self.make_token(TokenType::TOKEN_COMMA),
-            '.' => self.make_token(TokenType::TOKEN_DOT),
-            '-' => self.make_token(TokenType::TOKEN_MINUS),
-            '+' => self.make_token(TokenType::TOKEN_PLUS),
-            '/' => self.make_token(TokenType::TOKEN_SLASH),
-            '*' => self.make_token(TokenType::TOKEN_STAR),
+            '(' => self.make_token(TokenType::LeftParen),
+            ')' => self.make_token(TokenType::RightParen),
+            '{' => self.make_token(TokenType::LeftBrace),
+            '}' => self.make_token(TokenType::RightBrace),
+            ';' => self.make_token(TokenType::Semicolon),
+            ',' => self.make_token(TokenType::Comma),
+            '.' => self.make_token(TokenType::Dot),
+            '-' => self.make_token(TokenType::Minus),
+            '+' => self.make_token(TokenType::Plus),
+            '/' => self.make_token(TokenType::Slash),
+            '*' => self.make_token(TokenType::Star),
             '!' => {
                 if self.matches('=') {
-                    self.make_token(TokenType::TOKEN_BANG_EQUAL)
+                    self.make_token(TokenType::BangEqual)
                 } else {
-                    self.make_token(TokenType::TOKEN_BANG)
+                    self.make_token(TokenType::Bang)
                 }
             }
             '=' => {
                 if self.matches('=') {
-                    self.make_token(TokenType::TOKEN_EQUAL_EQUAL)
+                    self.make_token(TokenType::EqualEqual)
                 } else {
-                    self.make_token(TokenType::TOKEN_EQUAL)
+                    self.make_token(TokenType::Equal)
                 }
             }
             '<' => {
                 if self.matches('=') {
-                    self.make_token(TokenType::TOKEN_LESS_EQUAL)
+                    self.make_token(TokenType::LessEqual)
                 } else {
-                    self.make_token(TokenType::TOKEN_LESS)
+                    self.make_token(TokenType::Less)
                 }
             }
             '>' => {
                 if self.matches('=') {
-                    self.make_token(TokenType::TOKEN_GREATER_EQUAL)
+                    self.make_token(TokenType::GreaterEqual)
                 } else {
-                    self.make_token(TokenType::TOKEN_GREATER)
+                    self.make_token(TokenType::Greater)
                 }
             }
             '"' => self.string(),
@@ -113,7 +113,7 @@ impl Scanner<'_> {
         match self.peek() {
             Some(c) => {
                 if expected == c {
-                    self.source.next();
+                    self.advance();
                     true
                 } else {
                     false
@@ -142,7 +142,7 @@ impl Scanner<'_> {
 
     fn error_token(&self, message: &str) -> Token {
         Token {
-            token_type: TokenType::TOKEN_ERROR,
+            token_type: TokenType::Error,
             contents: message.to_string(),
             line: self.line,
         }
@@ -182,7 +182,7 @@ impl Scanner<'_> {
         } else {
             // Closing
             self.advance();
-            self.make_token(TokenType::TOKEN_STRING)
+            self.make_token(TokenType::String)
         }
     }
 
@@ -197,7 +197,7 @@ impl Scanner<'_> {
                 self.advance();
             }
         }
-        self.make_token(TokenType::TOKEN_NUMBER)
+        self.make_token(TokenType::Number)
     }
 
     fn identifier(& mut self) -> Token {
@@ -209,24 +209,24 @@ impl Scanner<'_> {
 
     fn identifier_type(&self) -> TokenType {
         let keywords = HashMap::from([
-            ("and", TokenType::TOKEN_AND),
-            ("class", TokenType::TOKEN_CLASS),
-            ("else", TokenType::TOKEN_ELSE),
-            ("false", TokenType::TOKEN_FALSE),
-            ("for", TokenType::TOKEN_FOR),
-            ("fun", TokenType::TOKEN_FUN),
-            ("if", TokenType::TOKEN_IF),
-            ("nil", TokenType::TOKEN_NIL),
-            ("or", TokenType::TOKEN_OR),
-            ("print", TokenType::TOKEN_PRINT),
-            ("return", TokenType::TOKEN_RETURN),
-            ("super", TokenType::TOKEN_SUPER),
-            ("this", TokenType::TOKEN_THIS),
-            ("true", TokenType::TOKEN_TRUE),
-            ("var", TokenType::TOKEN_VAR),
-            ("while", TokenType::TOKEN_WHILE)
+            ("and", TokenType::And),
+            ("class", TokenType::Class),
+            ("else", TokenType::Else),
+            ("false", TokenType::False),
+            ("for", TokenType::For),
+            ("fun", TokenType::Fun),
+            ("if", TokenType::If),
+            ("nil", TokenType::Nil),
+            ("or", TokenType::Or),
+            ("print", TokenType::Print),
+            ("return", TokenType::Return),
+            ("super", TokenType::Super),
+            ("this", TokenType::This),
+            ("true", TokenType::True),
+            ("var", TokenType::Var),
+            ("while", TokenType::While)
         ]);
-        *keywords.get(self.buffer.as_str()).unwrap_or(&TokenType::TOKEN_IDENTIFIER)
+        *keywords.get(self.buffer.as_str()).unwrap_or(&TokenType::Identifier)
     }
 
     fn is_digit(c: char) -> bool {

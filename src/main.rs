@@ -2,34 +2,14 @@ extern crate num;
 
 mod chunk;
 mod compiler;
+mod value;
 mod scanner;
 mod vm;
 
-use chunk::{Chunk, OpCode};
 use compiler::compile;
 
 use vm::VM;
 use std::{fs, io, env};
-
-fn write_op(chunk: &mut Chunk, op: OpCode, line: u32) {
-    chunk.write_byte(num::ToPrimitive::to_u8(&op).unwrap(), line)
-}
-
-fn write_constant(chunk: &mut Chunk, constant: f64, line: u32) {
-    let constant = chunk.add_constant(constant);
-    write_op(chunk, OpCode::Constant, line);
-    chunk.write_byte(constant, line);
-}
-
-fn insert_debug_chunk(chunk: &mut Chunk) {
-    write_constant(chunk, 1.2, 123);
-    write_constant(chunk, 3.4, 123);
-    write_op(chunk, OpCode::Add, 123);
-    write_constant(chunk, 5.6, 123);
-    write_op(chunk, OpCode::Divide, 123);
-    write_op(chunk, OpCode::Negate, 123);
-    write_op(chunk, OpCode::Return, 123);
-}
 
 fn repl() {
     loop {

@@ -4,20 +4,29 @@ extern crate num_derive;
 use num_derive::FromPrimitive;
 use num_derive::ToPrimitive;
 
+use crate::value::LoxValue;
+
 #[derive(Debug, FromPrimitive, ToPrimitive)]
 pub enum OpCode {
     Constant,
+    Nil,
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
     Add,
     Subtract,
     Multiply,
     Divide,
+    Not,
     Negate,
     Return,
 }
 
 pub struct Chunk {
     code: Vec<u8>,
-    constants: Vec<f64>,
+    constants: Vec<LoxValue>,
     lines: Vec<u32>,
 }
 
@@ -35,7 +44,7 @@ impl Chunk {
         self.lines.push(line);
     }
 
-    pub fn add_constant(&mut self, constant: f64) -> u8 {
+    pub fn add_constant(&mut self, constant: LoxValue) -> u8 {
         self.constants.push(constant);
         (self.constants.len() - 1) as u8
     }
@@ -44,7 +53,7 @@ impl Chunk {
         self.code[offset]
     }
 
-    pub fn read_constant(&self, offset: usize) -> f64 {
+    pub fn read_constant(&self, offset: usize) -> LoxValue {
         self.constants[offset]
     }
 
@@ -74,10 +83,17 @@ impl Chunk {
 
         match as_enum {
             OpCode::Constant => self.constant_instruction(OpCode::Constant, offset),
+            OpCode::Nil => Self::simple_instruction(as_enum, offset),
+            OpCode::True => Self::simple_instruction(as_enum, offset),
+            OpCode::False => Self::simple_instruction(as_enum, offset),
+            OpCode::Equal => Self::simple_instruction(as_enum, offset),
+            OpCode::Greater => Self::simple_instruction(as_enum, offset),
+            OpCode::Less => Self::simple_instruction(as_enum, offset),
             OpCode::Add => Self::simple_instruction(as_enum, offset),
             OpCode::Subtract => Self::simple_instruction(as_enum, offset),
             OpCode::Multiply => Self::simple_instruction(as_enum, offset),
             OpCode::Divide => Self::simple_instruction(as_enum, offset),
+            OpCode::Not => Self::simple_instruction(as_enum, offset),
             OpCode::Negate => Self::simple_instruction(as_enum, offset),
             OpCode::Return => Self::simple_instruction(as_enum, offset),
         }
@@ -90,7 +106,7 @@ impl Chunk {
 
     fn constant_instruction(&self, instruction: OpCode, offset: usize) -> usize {
         let constant = self.code[offset + 1];
-        let value = self.constants[constant as usize];
+        let value = &self.constants[constant as usize];
         println!("{:<16} {:04} '{:?}'", format!("{:?}", instruction), constant, value);
         offset + 2
     }

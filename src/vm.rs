@@ -1,13 +1,13 @@
 extern crate num;
 
-use crate::{chunk};
+use crate::{chunk, value::LoxValue};
 use chunk::{Chunk, OpCode};
 
 pub struct VM<'a> {
     chunk: &'a Chunk,
     offset: usize,
     debug: bool,
-    stack: Vec<f64>,
+    stack: Vec<LoxValue>,
 }
 
 impl VM<'_> {
@@ -36,27 +36,108 @@ pub fn run(&mut self) -> u8 {
                     let constant = self.read_constant();
                     self.push(constant);
                 },
+                OpCode::Nil => self.push(LoxValue::Nil),
+                OpCode::True => self.push(LoxValue::Bool(true)),
+                OpCode::False => self.push(LoxValue::Bool(false)),
+                OpCode::Equal => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(LoxValue::Bool(self.values_equal(a,b)))
+                },
+                OpCode::Greater => {
+                    match (self.peek(0), self.peek(1)) {
+                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxValue::Bool(b > a));
+                        },
+                        _ => {
+                            self.runtime_error("Operands must be numbers.");
+                            return 1;
+                        },
+                    }
+                }
+                OpCode::Less => {
+                    match (self.peek(0), self.peek(1)) {
+                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxValue::Bool(b < a));
+                        },
+                        _ => {
+                            self.runtime_error("Operands must be numbers.");
+                            return 1;
+                        },
+                    }
+                }
                 OpCode::Add => {
-                    let total = self.pop() + self.pop();
-                    self.push(total);
+                    match (self.peek(0), self.peek(1)) {
+                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxValue::Double(a + b));
+                        },
+                        _ => {
+                            self.runtime_error("Operands must be numbers.");
+                            return 1;
+                        },
+                    }
                 }
                 OpCode::Subtract => {
-                    let b = self.pop();
-                    let total = self.pop() - b;
-                    self.push(total);
+                    match (self.peek(0), self.peek(1)) {
+                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxValue::Double(b - a));
+                        },
+                        _ => {
+                            self.runtime_error("Operands must be numbers.");
+                            return 1;
+                        },
+                    }
                 }
                 OpCode::Multiply => {
-                    let total = self.pop() * self.pop();
-                    self.push(total);
+                    match (self.peek(0), self.peek(1)) {
+                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxValue::Double(a * b));
+                        },
+                        _ => {
+                            self.runtime_error("Operands must be numbers.");
+                            return 1;
+                        },
+                    }
                 }
                 OpCode::Divide => {
-                    let b = self.pop();
-                    let total = self.pop() / b;
-                    self.push(total);
+                    match (self.peek(0), self.peek(1)) {
+                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                            self.pop();
+                            self.pop();
+                            self.push(LoxValue::Double(b / a));
+                        },
+                        _ => {
+                            self.runtime_error("Operands must be numbers.");
+                            return 1;
+                        },
+                    }
                 }
+                OpCode::Not => {
+                    let value = self.pop();
+                    let inverted = self.is_falsey(value);
+                    self.push(LoxValue::Bool(inverted));
+                },
                 OpCode::Negate => {
-                    let negated = -self.pop();
-                    self.push(negated);
+                    match self.peek(0) {
+                        LoxValue::Double(d) => {
+                            self.pop();
+                            self.push(LoxValue::Double(-d));
+                        }
+                        _ => {
+                            self.runtime_error("Operand must be a number.");
+                            return 1;
+                        },
+                    }
                 }
                 OpCode::Return => {
                     println!("{:?}", self.pop());
@@ -66,15 +147,36 @@ pub fn run(&mut self) -> u8 {
         }
     }
 
-    fn push(&mut self, value: f64) {
+    fn push(&mut self, value: LoxValue) {
         self.stack.push(value)
     }
 
-    fn pop(&mut self) -> f64 {
+    fn pop(&mut self) -> LoxValue {
         self.stack.pop().unwrap()
     }
 
-    fn read_constant(&mut self) -> f64 {
+    fn peek(&self, distance: usize) -> LoxValue {
+        self.stack[self.stack.len() - distance -1]
+    }
+
+    fn is_falsey(&self, value: LoxValue) -> bool {
+        match value {
+            LoxValue::Nil => true,
+            LoxValue::Bool(b) => !b,
+            LoxValue::Double(_) => false,
+        }
+    }
+
+    fn values_equal(&self, left: LoxValue, right: LoxValue) -> bool {
+        match (left, right) {
+            (LoxValue::Bool(l), LoxValue::Bool(r)) => l == r,
+            (LoxValue::Double(l), LoxValue::Double(r)) => l == r,
+            (LoxValue::Nil, LoxValue::Nil) => true,
+            _ => false,
+        }
+    }
+
+    fn read_constant(&mut self) -> LoxValue {
         let new_offset = self.read_byte() as usize;
         self.chunk.read_constant(new_offset)
     }
@@ -83,5 +185,11 @@ pub fn run(&mut self) -> u8 {
         let byte = self.chunk.read_byte(self.offset);
         self.offset += 1;
         byte
+    }
+
+    fn runtime_error(&self, msg: &str) {
+        println!("{}", msg);
+        let line = self.chunk.line_at(self.offset - 1);
+        println!("[line {}] in script", line);
     }
 }

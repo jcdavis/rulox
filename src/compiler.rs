@@ -1,6 +1,6 @@
-use std::{borrow::Borrow, cell::RefCell};
+use std::cell::RefCell;
 
-use crate::{chunk::{self, Chunk, OpCode}, scanner::{self, Scanner}};
+use crate::{chunk::{self, Chunk, OpCode}, value::LoxValue, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
 
 struct Compiler<'a> {
@@ -31,7 +31,7 @@ pub fn compile(source: &str) -> Option<Chunk> {
     let mut compiler = Compiler::new(scanner);
     compiler.advance();
     compiler.expression();
-    compiler.consume(TokenType::TOKEN_EOF, "Expect end of expression.");
+    compiler.consume(TokenType::Eof, "Expect end of expression.");
     compiler.end_compiler();
 
     if *compiler.had_error.borrow() {
@@ -59,7 +59,7 @@ impl Compiler<'_> {
         loop {
             self.current = Some(self.scanner.scan_token());
             let current_token = self.current.as_ref().expect("?");
-            if current_token.token_type == TokenType::TOKEN_ERROR {
+            if current_token.token_type == TokenType::Error {
                 self.error_at_current(current_token.contents.as_str());
             } else {
                 break;
@@ -89,13 +89,13 @@ impl Compiler<'_> {
         }
     }
 
-    pub fn emit_constant(&mut self, constant: f64) {
+    pub fn emit_constant(&mut self, constant: LoxValue) {
         self.emit_opcode(OpCode::Constant);
         let constant_id = self.make_constant(constant);
         self.emit_byte(constant_id);
     }
 
-    pub fn make_constant(&mut self, constant: f64) -> u8 {
+    pub fn make_constant(&mut self, constant: LoxValue) -> u8 {
         // Handle Constant pool overlfow?
         self.chunk.add_constant(constant)
     }
@@ -111,14 +111,14 @@ impl Compiler<'_> {
 
     pub fn grouping(&mut self) {
         self.expression();
-        self.consume(TokenType::TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+        self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
     pub fn number(&mut self) {
         let str = &self.previous.as_ref().unwrap().contents;
         let parsed = str.parse::<f64>();
         match parsed {
-            Ok(double) => self.emit_constant(double),
+            Ok(double) => self.emit_constant(LoxValue::Double(double)),
             Err(_err) => self.error(format!("Unable to parse {}", str).as_str()),
         }
     }
@@ -127,7 +127,8 @@ impl Compiler<'_> {
         let operator_type = self.previous.as_ref().unwrap().token_type;
         self.parse_precedence(PRECEDENCE_UNARY);
         match operator_type {
-            TokenType::TOKEN_MINUS => self.emit_opcode(OpCode::Negate),
+            TokenType::Minus => self.emit_opcode(OpCode::Negate),
+            TokenType::Bang => self.emit_opcode(OpCode::Not),
             _ => (),
         }
     }
@@ -138,11 +139,35 @@ impl Compiler<'_> {
         self.parse_precedence(precedence + 1); // +1 somehow
 
         match operator_type {
-            TokenType::TOKEN_PLUS => self.emit_opcode(OpCode::Add),
-            TokenType::TOKEN_MINUS => self.emit_opcode(OpCode::Subtract),
-            TokenType::TOKEN_STAR => self.emit_opcode(OpCode::Multiply),
-            TokenType::TOKEN_SLASH => self.emit_opcode(OpCode::Divide),
+            TokenType::BangEqual => {
+                self.emit_opcode(OpCode::Equal);
+                self.emit_opcode(OpCode::Not);
+            },
+            TokenType::EqualEqual => self.emit_opcode(OpCode::Equal),
+            TokenType::Greater => self.emit_opcode(OpCode::Greater),
+            TokenType::GreaterEqual => {
+                self.emit_opcode(OpCode::Less);
+                self.emit_opcode(OpCode::Not);
+            },
+            TokenType::Less => self.emit_opcode(OpCode::Less),
+            TokenType::LessEqual => {
+                self.emit_opcode(OpCode::Greater);
+                self.emit_opcode(OpCode::Not);
+            },
+            TokenType::Plus => self.emit_opcode(OpCode::Add),
+            TokenType::Minus => self.emit_opcode(OpCode::Subtract),
+            TokenType::Star => self.emit_opcode(OpCode::Multiply),
+            TokenType::Slash => self.emit_opcode(OpCode::Divide),
             _ => (),
+        }
+    }
+
+    pub fn literal(&mut self) {
+        match self.previous.as_ref().map(|f| f.token_type) {
+            Some(TokenType::Nil) => self.emit_opcode(OpCode::Nil),
+            Some(TokenType::True) => self.emit_opcode(OpCode::True),
+            Some(TokenType::False) => self.emit_opcode(OpCode::False),
+            _ => panic!("Unexpected literal {:?}", self.previous),
         }
     }
 
@@ -158,24 +183,29 @@ impl Compiler<'_> {
 
      pub fn do_prefix(&mut self, token_type: TokenType) {
         match token_type {
-            TokenType::TOKEN_LEFT_PAREN => self.grouping(),
-            TokenType::TOKEN_MINUS => self.unary(),
-            TokenType::TOKEN_NUMBER => self.number(),
+            TokenType::LeftParen => self.grouping(),
+            TokenType::Minus | TokenType::Bang => self.unary(),
+            TokenType::Number => self.number(),
+            TokenType::Nil | TokenType::True | TokenType::False => self.literal(),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
         }
      }
 
      pub fn do_infix(&mut self, token_type: TokenType) {
         match token_type {
-            TokenType::TOKEN_MINUS | TokenType::TOKEN_PLUS | TokenType::TOKEN_SLASH | TokenType::TOKEN_STAR => self.binary(),
+            TokenType::Minus | TokenType::Plus | TokenType::Slash | TokenType::Star => self.binary(),
+            TokenType::BangEqual | TokenType::EqualEqual | TokenType::Greater | TokenType::GreaterEqual |
+                TokenType::Less | TokenType::LessEqual => self.binary(),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
         }
      }
 
      pub fn get_precedence(&mut self, token_type: TokenType) -> Precedence {
         match token_type {
-            TokenType::TOKEN_MINUS | TokenType::TOKEN_PLUS => PRECEDENCE_TERM,
-            TokenType::TOKEN_SLASH | TokenType::TOKEN_STAR => PRECEDENCE_FACTOR,
+            TokenType::Minus | TokenType::Plus => PRECEDENCE_TERM,
+            TokenType::Slash | TokenType::Star => PRECEDENCE_FACTOR,
+            TokenType::BangEqual | TokenType::EqualEqual => PRECEDENCE_EQUALITY,
+            TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual => PRECEDENCE_COMPARISON,
             _ => PRECEDENCE_NONE,
         }
      }
@@ -198,8 +228,8 @@ impl Compiler<'_> {
         print!("[Line {}] Error", unwrapped.line);
 
         match unwrapped.token_type {
-            TokenType::TOKEN_EOF => print!(" at end."),
-            TokenType::TOKEN_ERROR => (),
+            TokenType::Eof => print!(" at end."),
+            TokenType::Error => (),
             _ => print!(" at {}", unwrapped.contents),
         }
         println!(" {}", message);
