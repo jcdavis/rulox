@@ -12,6 +12,9 @@ pub enum OpCode {
     Nil,
     True,
     False,
+    Pop,
+    GetGlobal,
+    DefineGlobal,
     Equal,
     Greater,
     Less,
@@ -21,6 +24,7 @@ pub enum OpCode {
     Divide,
     Not,
     Negate,
+    Print,
     Return,
 }
 
@@ -82,10 +86,13 @@ impl Chunk {
         let as_enum: OpCode = num::FromPrimitive::from_u8(instruction).unwrap_or_else(|| panic!("Unparseble {}", instruction));
 
         match as_enum {
-            OpCode::Constant => self.constant_instruction(OpCode::Constant, offset),
+            OpCode::Constant => self.constant_instruction(as_enum, offset),
             OpCode::Nil => Self::simple_instruction(as_enum, offset),
             OpCode::True => Self::simple_instruction(as_enum, offset),
             OpCode::False => Self::simple_instruction(as_enum, offset),
+            OpCode::Pop => Self::simple_instruction(as_enum, offset),
+            OpCode::GetGlobal => self.constant_instruction(as_enum, offset),
+            OpCode::DefineGlobal => self.constant_instruction(as_enum, offset),
             OpCode::Equal => Self::simple_instruction(as_enum, offset),
             OpCode::Greater => Self::simple_instruction(as_enum, offset),
             OpCode::Less => Self::simple_instruction(as_enum, offset),
@@ -95,6 +102,7 @@ impl Chunk {
             OpCode::Divide => Self::simple_instruction(as_enum, offset),
             OpCode::Not => Self::simple_instruction(as_enum, offset),
             OpCode::Negate => Self::simple_instruction(as_enum, offset),
+            OpCode::Print => Self::simple_instruction(as_enum, offset),
             OpCode::Return => Self::simple_instruction(as_enum, offset),
         }
     }

@@ -1,6 +1,6 @@
 extern crate num;
 
-use std::{rc::Rc, ops::Add};
+use std::{rc::Rc, collections::HashMap};
 
 use crate::{chunk, value::LoxValue};
 use chunk::{Chunk, OpCode};
@@ -10,6 +10,7 @@ pub struct VM<'a> {
     offset: usize,
     debug: bool,
     stack: Vec<LoxValue>,
+    globals: HashMap<String, LoxValue>,
 }
 
 impl VM<'_> {
@@ -19,6 +20,7 @@ impl VM<'_> {
             offset: 0,
             debug: false,
             stack: Vec::new(),
+            globals: HashMap::new(),
         }
     }
 
@@ -41,6 +43,36 @@ impl VM<'_> {
                 OpCode::Nil => self.push(LoxValue::Nil),
                 OpCode::True => self.push(LoxValue::Bool(true)),
                 OpCode::False => self.push(LoxValue::Bool(false)),
+                OpCode::Pop => { self.pop(); },
+                OpCode::GetGlobal => {
+                    match self.read_constant().as_string() {
+                        Some(name) => {
+                            match self.globals.get(&name) {
+                                Some(value) => self.push(value.clone()),
+                                None => {
+                                    self.runtime_error(&format!("Undefined variable {}", name));
+                                    return 1;
+                                },
+                            }
+                        },
+                        None => {
+                            self.runtime_error("Name constant is not a string!");
+                            return 1;
+                        }
+                    }
+                },
+                OpCode::DefineGlobal => {
+                    match self.read_constant().as_string() {
+                        Some(name) => {
+                            let value = self.pop();
+                            self.globals.insert(name, value);
+                        }
+                        None => {
+                            self.runtime_error("Name constant is not a string!");
+                            return 1;
+                        }
+                    }
+                },
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
@@ -148,8 +180,10 @@ impl VM<'_> {
                         },
                     }
                 }
-                OpCode::Return => {
+                OpCode::Print => {
                     println!("{:?}", self.pop());
+                }
+                OpCode::Return => {
                     return 0;
                 },
             }

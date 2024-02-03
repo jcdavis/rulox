@@ -1,5 +1,4 @@
 
-use core::str;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
@@ -25,9 +24,9 @@ impl LoxValue {
         }
     }
 
-    pub fn as_string(&self) -> Option<&String> {
+    pub fn as_string(&self) -> Option<String> {
         match self {
-            LoxValue::String(string) => Some(string),
+            LoxValue::String(contents) => Some((**contents).clone()),
             _ => None,
         }
     }

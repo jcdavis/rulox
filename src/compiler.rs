@@ -31,8 +31,11 @@ pub fn compile(source: &str) -> Option<Chunk> {
     let scanner = scanner::Scanner::new(source);
     let mut compiler = Compiler::new(scanner);
     compiler.advance();
-    compiler.expression();
-    compiler.consume(TokenType::Eof, "Expect end of expression.");
+
+    while !compiler.matches(TokenType::Eof) {
+        compiler.declaration();
+    }
+
     compiler.end_compiler();
 
     if *compiler.had_error.borrow() {
@@ -76,6 +79,19 @@ impl Compiler<'_> {
         }
     }
 
+    pub fn matches(&mut self, token_type: TokenType) -> bool {
+        if self.check(token_type) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn check(&self, token_type: TokenType) -> bool {
+        self.current.as_ref().unwrap().token_type == token_type
+    }
+
     pub fn emit_opcode(&mut self, opcode: OpCode) {
         self.emit_byte(num::ToPrimitive::to_u8(&opcode).unwrap());
     }
@@ -110,6 +126,80 @@ impl Compiler<'_> {
         self.parse_precedence(PRECEDENCE_ASSIGNMENT);
     }
 
+    pub fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit_opcode(OpCode::Pop);
+    }
+
+    pub fn declaration(&mut self) {
+        if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
+
+        if *self.panic_mode.borrow() {
+            self.synchronize();
+        }
+    }
+
+    pub fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expect variable name");
+
+        if self.matches(TokenType::Equal) {
+            self.expression();
+        } else {
+            self.emit_opcode(OpCode::Nil);
+        }
+        self.consume(TokenType::Semicolon, "Expect ';' after variable declaration.");
+        self.define_variable(global);
+    }
+
+    pub fn parse_variable(&mut self, error_message: &str) -> u8 {
+        self.consume(TokenType::Identifier, error_message);
+        let var_name = self.previous.as_ref().unwrap().contents.clone();
+        self.identifier_constant(var_name)
+    }
+
+    pub fn define_variable(&mut self, id: u8) {
+        self.emit_opcode(OpCode::DefineGlobal);
+        self.emit_byte(id);
+    }
+
+    pub fn identifier_constant(&mut self, name: String) -> u8 {
+        self.chunk.add_constant(LoxValue::String(Rc::new(name)))
+    }
+
+    pub fn statement(&mut self) {
+        if self.matches(TokenType::Print) {
+            self.print_statement();
+        } else {
+            self.expression_statement();
+        }
+    }
+
+    pub fn print_statement(&mut  self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit_opcode(OpCode::Print);
+    }
+
+    pub fn synchronize(&mut self) {
+        *self.panic_mode.borrow_mut() = false;
+        while self.current.as_ref().map(|t| t.token_type) != Some(TokenType::Eof) {
+            if self.previous.as_ref().map(|t| t.token_type) == Some(TokenType::Semicolon) {
+                return;
+            }
+            match self.current.as_ref().map(|t| t.token_type) {
+                Some(TokenType::Class) | Some(TokenType::Fun) | Some(TokenType::Var) | Some(TokenType::For) | Some(TokenType::Fun) |
+                    Some(TokenType::If) | Some(TokenType::While) | Some(TokenType::Print) | Some(TokenType::Return) => return,
+                _ => ()
+            }
+            self.advance();
+        }
+    }
+
     pub fn grouping(&mut self) {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after expression.");
@@ -127,6 +217,13 @@ impl Compiler<'_> {
     pub fn string(&mut self) {
         let cloned_contents = self.previous.as_ref().unwrap().contents.clone();
         self.emit_constant(LoxValue::String(Rc::new(cloned_contents)));
+    }
+
+    pub fn variable(&mut self) {
+        let var_name = self.previous.as_ref().unwrap().contents.clone();
+        let id = self.identifier_constant(var_name);
+        self.emit_opcode(OpCode::GetGlobal);
+        self.emit_byte(id);
     }
 
     pub fn unary(&mut self) {
@@ -191,6 +288,7 @@ impl Compiler<'_> {
         match token_type {
             TokenType::LeftParen => self.grouping(),
             TokenType::Minus | TokenType::Bang => self.unary(),
+            TokenType::Identifier => self.variable(),
             TokenType::String => self.string(),
             TokenType::Number => self.number(),
             TokenType::Nil | TokenType::True | TokenType::False => self.literal(),
