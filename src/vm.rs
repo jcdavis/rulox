@@ -24,7 +24,7 @@ impl VM<'_> {
         self.debug = true;
     }
 
-pub fn run(&mut self) -> u8 {
+    pub fn run(&mut self) -> u8 {
         loop {
             if self.debug {
                 println!("{:?}", self.stack);
