@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::{chunk::{self, Chunk, OpCode}, value::LoxValue, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
@@ -123,6 +124,11 @@ impl Compiler<'_> {
         }
     }
 
+    pub fn string(&mut self) {
+        let cloned_contents = self.previous.as_ref().unwrap().contents.clone();
+        self.emit_constant(LoxValue::String(Rc::new(cloned_contents)));
+    }
+
     pub fn unary(&mut self) {
         let operator_type = self.previous.as_ref().unwrap().token_type;
         self.parse_precedence(PRECEDENCE_UNARY);
@@ -185,6 +191,7 @@ impl Compiler<'_> {
         match token_type {
             TokenType::LeftParen => self.grouping(),
             TokenType::Minus | TokenType::Bang => self.unary(),
+            TokenType::String => self.string(),
             TokenType::Number => self.number(),
             TokenType::Nil | TokenType::True | TokenType::False => self.literal(),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),

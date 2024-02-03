@@ -171,6 +171,7 @@ impl Scanner<'_> {
     }
 
     fn string(&mut self) -> Token {
+        self.buffer.clear();
         while self.peek() != Some('"') && !self.is_at_end() {
             if self.peek() == Some('\n') {
                 self.line += 1;
@@ -180,9 +181,10 @@ impl Scanner<'_> {
         if self.is_at_end() {
             self.error_token("Unterminated string")
         } else {
+            let token = self.make_token(TokenType::String);
             // Closing
             self.advance();
-            self.make_token(TokenType::String)
+            token
         }
     }
 

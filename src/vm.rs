@@ -1,5 +1,7 @@
 extern crate num;
 
+use std::{rc::Rc, ops::Add};
+
 use crate::{chunk, value::LoxValue};
 use chunk::{Chunk, OpCode};
 
@@ -33,7 +35,7 @@ impl VM<'_> {
             let inst: OpCode = num::FromPrimitive::from_u8(self.read_byte()).unwrap();
             match inst {
                 OpCode::Constant => {
-                    let constant = self.read_constant();
+                    let constant = self.read_constant().clone();
                     self.push(constant);
                 },
                 OpCode::Nil => self.push(LoxValue::Nil),
@@ -42,11 +44,11 @@ impl VM<'_> {
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
-                    self.push(LoxValue::Bool(self.values_equal(a,b)))
+                    self.push(LoxValue::Bool(self.values_equal(&a,&b)))
                 },
                 OpCode::Greater => {
-                    match (self.peek(0), self.peek(1)) {
-                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                    match (self.peek(0).as_double(), self.peek(1).as_double()) {
+                        (Some(a), Some(b)) => {
                             self.pop();
                             self.pop();
                             self.push(LoxValue::Bool(b > a));
@@ -58,8 +60,8 @@ impl VM<'_> {
                     }
                 }
                 OpCode::Less => {
-                    match (self.peek(0), self.peek(1)) {
-                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                    match (self.peek(0).as_double(), self.peek(1).as_double()) {
+                        (Some(a), Some(b)) => {
                             self.pop();
                             self.pop();
                             self.push(LoxValue::Bool(b < a));
@@ -71,11 +73,18 @@ impl VM<'_> {
                     }
                 }
                 OpCode::Add => {
-                    match (self.peek(0), self.peek(1)) {
+                    match (self.peek(0).clone(), self.peek(1).clone()) {
                         (LoxValue::Double(a), LoxValue::Double(b)) => {
                             self.pop();
                             self.pop();
                             self.push(LoxValue::Double(a + b));
+                        },
+                        (LoxValue::String(a), LoxValue::String(b)) => {
+                            self.pop();
+                            self.pop();
+                            let mut string = (*b).clone();
+                            string.push_str(&a);
+                            self.push(LoxValue::String(Rc::new(string)));
                         },
                         _ => {
                             self.runtime_error("Operands must be numbers.");
@@ -84,8 +93,8 @@ impl VM<'_> {
                     }
                 }
                 OpCode::Subtract => {
-                    match (self.peek(0), self.peek(1)) {
-                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                    match (self.peek(0).as_double(), self.peek(1).as_double()) {
+                        (Some(a), Some(b)) => {
                             self.pop();
                             self.pop();
                             self.push(LoxValue::Double(b - a));
@@ -97,8 +106,8 @@ impl VM<'_> {
                     }
                 }
                 OpCode::Multiply => {
-                    match (self.peek(0), self.peek(1)) {
-                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                    match (self.peek(0).as_double(), self.peek(1).as_double()) {
+                        (Some(a), Some(b)) => {
                             self.pop();
                             self.pop();
                             self.push(LoxValue::Double(a * b));
@@ -110,8 +119,8 @@ impl VM<'_> {
                     }
                 }
                 OpCode::Divide => {
-                    match (self.peek(0), self.peek(1)) {
-                        (LoxValue::Double(a), LoxValue::Double(b)) => {
+                    match (self.peek(0).as_double(), self.peek(1).as_double()) {
+                        (Some(a), Some(b)) => {
                             self.pop();
                             self.pop();
                             self.push(LoxValue::Double(b / a));
@@ -124,12 +133,12 @@ impl VM<'_> {
                 }
                 OpCode::Not => {
                     let value = self.pop();
-                    let inverted = self.is_falsey(value);
+                    let inverted = self.is_falsey(&value);
                     self.push(LoxValue::Bool(inverted));
                 },
                 OpCode::Negate => {
-                    match self.peek(0) {
-                        LoxValue::Double(d) => {
+                    match self.peek(0).as_double() {
+                        Some(d) => {
                             self.pop();
                             self.push(LoxValue::Double(-d));
                         }
@@ -155,28 +164,29 @@ impl VM<'_> {
         self.stack.pop().unwrap()
     }
 
-    fn peek(&self, distance: usize) -> LoxValue {
-        self.stack[self.stack.len() - distance -1]
+    fn peek(&self, distance: usize) -> &LoxValue {
+        &self.stack[self.stack.len() - distance -1]
     }
 
-    fn is_falsey(&self, value: LoxValue) -> bool {
+    fn is_falsey(&self, value: &LoxValue) -> bool {
         match value {
             LoxValue::Nil => true,
             LoxValue::Bool(b) => !b,
-            LoxValue::Double(_) => false,
+            LoxValue::Double(_) | LoxValue::String(_) => false,
         }
     }
 
-    fn values_equal(&self, left: LoxValue, right: LoxValue) -> bool {
+    fn values_equal(&self, left: &LoxValue, right: &LoxValue) -> bool {
         match (left, right) {
             (LoxValue::Bool(l), LoxValue::Bool(r)) => l == r,
             (LoxValue::Double(l), LoxValue::Double(r)) => l == r,
             (LoxValue::Nil, LoxValue::Nil) => true,
+            (LoxValue::String(l), LoxValue::String(r)) => l == r,
             _ => false,
         }
     }
 
-    fn read_constant(&mut self) -> LoxValue {
+    fn read_constant(&mut self) -> &LoxValue {
         let new_offset = self.read_byte() as usize;
         self.chunk.read_constant(new_offset)
     }

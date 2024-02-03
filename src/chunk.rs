@@ -53,8 +53,8 @@ impl Chunk {
         self.code[offset]
     }
 
-    pub fn read_constant(&self, offset: usize) -> LoxValue {
-        self.constants[offset]
+    pub fn read_constant(&self, offset: usize) -> &LoxValue {
+        &self.constants[offset]
     }
 
     pub fn line_at(&self, offset: usize) -> u32 {
