@@ -219,10 +219,20 @@ impl Compiler<'_> {
         self.emit_constant(LoxValue::String(Rc::new(cloned_contents)));
     }
 
-    pub fn variable(&mut self) {
-        let var_name = self.previous.as_ref().unwrap().contents.clone();
-        let id = self.identifier_constant(var_name);
-        self.emit_opcode(OpCode::GetGlobal);
+    pub fn variable(&mut self, can_assign: bool) {
+        let name = self.previous.as_ref().unwrap().contents.clone();
+        self.named_variable(name, can_assign);
+    }
+
+    pub fn named_variable(&mut self, name: String, can_assign: bool) {
+        let id = self.identifier_constant(name);
+
+        if can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_opcode(OpCode::SetGlobal);
+        } else {
+            self.emit_opcode(OpCode::GetGlobal);
+        }
         self.emit_byte(id);
     }
 
@@ -276,19 +286,24 @@ impl Compiler<'_> {
 
     pub fn parse_precedence(&mut self, precedence: Precedence) {
         self.advance();
-        self.do_prefix(self.previous.as_ref().unwrap().token_type);
+        let can_assign = precedence <= PRECEDENCE_ASSIGNMENT;
+        self.do_prefix(self.previous.as_ref().unwrap().token_type, can_assign);
 
         while precedence <= self.get_precedence(self.current.as_ref().unwrap().token_type) {
             self.advance();
             self.do_infix(self.previous.as_ref().unwrap().token_type);
+
+            if can_assign && self.matches(TokenType::Equal) {
+                self.error("Invalid assignment target");
+            }
         }
     }
 
-     pub fn do_prefix(&mut self, token_type: TokenType) {
+     pub fn do_prefix(&mut self, token_type: TokenType, can_assign: bool) {
         match token_type {
             TokenType::LeftParen => self.grouping(),
             TokenType::Minus | TokenType::Bang => self.unary(),
-            TokenType::Identifier => self.variable(),
+            TokenType::Identifier => self.variable(can_assign),
             TokenType::String => self.string(),
             TokenType::Number => self.number(),
             TokenType::Nil | TokenType::True | TokenType::False => self.literal(),

@@ -73,6 +73,23 @@ impl VM<'_> {
                         }
                     }
                 },
+                OpCode::SetGlobal => {
+                    match self.read_constant().as_string() {
+                        Some(name) => {
+                            let value = self.peek(0).clone();
+                            if self.globals.contains_key(&name) {
+                                self.globals.insert(name, value);
+                            } else {
+                                self.runtime_error(format!("Undefined variable '{}'", name).as_str());
+                                return 1;
+                            }
+                        }
+                        None => {
+                            self.runtime_error("Name constant is not a string!");
+                            return 1;
+                        }
+                    }
+                },
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
