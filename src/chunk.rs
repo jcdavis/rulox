@@ -13,6 +13,8 @@ pub enum OpCode {
     True,
     False,
     Pop,
+    GetLocal,
+    SetLocal,
     GetGlobal,
     DefineGlobal,
     SetGlobal,
@@ -92,6 +94,8 @@ impl Chunk {
             OpCode::True => Self::simple_instruction(as_enum, offset),
             OpCode::False => Self::simple_instruction(as_enum, offset),
             OpCode::Pop => Self::simple_instruction(as_enum, offset),
+            OpCode::GetLocal => self.byte_instruction(as_enum, offset),
+            OpCode::SetLocal => self.byte_instruction(as_enum, offset),
             OpCode::GetGlobal => self.constant_instruction(as_enum, offset),
             OpCode::DefineGlobal => self.constant_instruction(as_enum, offset),
             OpCode::SetGlobal => self.constant_instruction(as_enum, offset),
@@ -112,6 +116,12 @@ impl Chunk {
     fn simple_instruction(instruction: OpCode, offset: usize) -> usize {
         println!("{:?}", instruction);
         offset + 1
+    }
+
+    fn byte_instruction(&self, instruction: OpCode, offset: usize) -> usize {
+        let slot = self.code[offset + 1];
+        println!("{:<16} {:04}", format!("{:?}", instruction), slot);
+        offset + 2
     }
 
     fn constant_instruction(&self, instruction: OpCode, offset: usize) -> usize {

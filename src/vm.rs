@@ -44,6 +44,14 @@ impl VM<'_> {
                 OpCode::True => self.push(LoxValue::Bool(true)),
                 OpCode::False => self.push(LoxValue::Bool(false)),
                 OpCode::Pop => { self.pop(); },
+                OpCode::GetLocal => {
+                    let slot = self.read_byte();
+                    self.push(self.stack[slot as usize].clone());
+                },
+                OpCode::SetLocal => {
+                    let slot = self.read_byte();
+                    self.stack[slot as usize] = self.peek(0).clone();
+                },
                 OpCode::GetGlobal => {
                     match self.read_constant().as_string() {
                         Some(name) => {

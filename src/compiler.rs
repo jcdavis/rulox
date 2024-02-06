@@ -11,6 +11,13 @@ struct Compiler<'a> {
     chunk: chunk::Chunk,
     had_error: RefCell<bool>,
     panic_mode: RefCell<bool>,
+    locals: Vec<Local>,
+    scope_depth: i32,
+}
+
+struct Local {
+    name: Token,
+    depth: i32,
 }
 
 type Precedence = u8;
@@ -54,6 +61,8 @@ impl Compiler<'_> {
             chunk: chunk::Chunk::new(),
             had_error: RefCell::new(false),
             panic_mode: RefCell::new(false),
+            locals: Vec::new(),
+            scope_depth: 0,
         }
     }
 
@@ -122,6 +131,20 @@ impl Compiler<'_> {
         self.chunk.disassemble("code");
     }
 
+    pub fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    pub fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+
+        let mut index = self.locals.len() - 1;
+        while self.locals.len() > 0 && self.locals.get(index).unwrap().depth > self.scope_depth {
+            self.emit_opcode(OpCode::Pop);
+            self.locals.pop();
+        }
+    }
+
     pub fn expression(&mut self) {
         self.parse_precedence(PRECEDENCE_ASSIGNMENT);
     }
@@ -158,25 +181,82 @@ impl Compiler<'_> {
 
     pub fn parse_variable(&mut self, error_message: &str) -> u8 {
         self.consume(TokenType::Identifier, error_message);
+
+        self.declare_variable();
+        if self.scope_depth > 0 {
+            return 0;
+        }
+
         let var_name = self.previous.as_ref().unwrap().contents.clone();
         self.identifier_constant(var_name)
     }
 
     pub fn define_variable(&mut self, id: u8) {
+        if self.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
+
         self.emit_opcode(OpCode::DefineGlobal);
         self.emit_byte(id);
+    }
+
+    pub fn mark_initialized(&mut self) {
+        let last_idx = self.locals.len() - 1;
+        self.locals[last_idx].depth = self.scope_depth;
     }
 
     pub fn identifier_constant(&mut self, name: String) -> u8 {
         self.chunk.add_constant(LoxValue::String(Rc::new(name)))
     }
 
+    pub fn declare_variable(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        let name = self.previous.as_ref().unwrap().clone();
+        for local in self.locals.iter().rev() {
+            if local.depth != -1 && local.depth < self.scope_depth {
+                break;
+            }
+            if name.contents == local.name.contents {
+                self.error("Already a variable with this name in this scope.");
+            }
+        }
+
+        self.add_local(name);
+    }
+
+    pub fn add_local(&mut self, name: Token) {
+        if self.locals.len() >= 255 {
+            self.error("Too many local variables in function.");
+            return;
+        }
+
+        self.locals.push(Local {
+            name: name,
+            depth: -1,
+        });
+    }
+
     pub fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
+    }
+
+    pub fn block(&mut self) {
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.declaration();
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
     pub fn print_statement(&mut  self) {
@@ -225,15 +305,33 @@ impl Compiler<'_> {
     }
 
     pub fn named_variable(&mut self, name: String, can_assign: bool) {
-        let id = self.identifier_constant(name);
+
+        let (arg, get_op, set_op) = match self.resolve_local(&name) {
+            Some(idx) => (idx, OpCode::GetLocal, OpCode::SetLocal),
+            None => (self.identifier_constant(name), OpCode::GetGlobal, OpCode::SetGlobal),
+        };
 
         if can_assign && self.matches(TokenType::Equal) {
             self.expression();
-            self.emit_opcode(OpCode::SetGlobal);
+            self.emit_opcode(set_op);
         } else {
-            self.emit_opcode(OpCode::GetGlobal);
+            self.emit_opcode(get_op);
         }
-        self.emit_byte(id);
+        self.emit_byte(arg);
+    }
+
+    pub fn resolve_local(&self, name: &String) -> Option<u8> {
+        let result_opt = self.locals.iter()
+            .enumerate()
+            .rev()
+            .find(|(idx, local)| local.name.contents == *name);
+
+        result_opt.map(|(index, local)| {
+            if local.depth == -1 {
+                self.error("Can't read local variable in its own initializer.");
+            }
+            index as u8
+        })
     }
 
     pub fn unary(&mut self) {
