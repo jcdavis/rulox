@@ -28,6 +28,9 @@ pub enum OpCode {
     Not,
     Negate,
     Print,
+    Jump,
+    JumpIfFalse,
+    Loop,
     Return,
 }
 
@@ -46,9 +49,14 @@ impl Chunk {
         }
     }
 
-    pub fn write_byte(&mut self, byte: u8, line: u32) {
+    pub fn write_byte(&mut self, byte: u8, line: u32) -> usize {
         self.code.push(byte);
         self.lines.push(line);
+        self.code.len() - 1
+    }
+
+    pub fn patch_byte(&mut self, byte: u8, idx: usize) {
+        self.code[idx] = byte;
     }
 
     pub fn add_constant(&mut self, constant: LoxValue) -> u8 {
@@ -76,6 +84,10 @@ impl Chunk {
             offset = self.disassemble_instruction(offset);
         }
 
+    }
+
+    pub fn code_len(&self) -> usize {
+        self.code.len()
     }
 
     pub fn disassemble_instruction(&self, offset: usize) -> usize {
@@ -109,6 +121,9 @@ impl Chunk {
             OpCode::Not => Self::simple_instruction(as_enum, offset),
             OpCode::Negate => Self::simple_instruction(as_enum, offset),
             OpCode::Print => Self::simple_instruction(as_enum, offset),
+            OpCode::Jump => self.jump_instruction(as_enum, offset, true),
+            OpCode::JumpIfFalse => self.jump_instruction(as_enum, offset, true),
+            OpCode::Loop  => self.jump_instruction(as_enum, offset, false),
             OpCode::Return => Self::simple_instruction(as_enum, offset),
         }
     }
@@ -122,6 +137,17 @@ impl Chunk {
         let slot = self.code[offset + 1];
         println!("{:<16} {:04}", format!("{:?}", instruction), slot);
         offset + 2
+    }
+
+    fn jump_instruction(&self, instruction: OpCode, offset: usize, direction_is_pos: bool) -> usize {
+        let jump = ((self.code[offset+1] as usize) << 8) + (self.code[offset+2] as usize);
+        let end = if direction_is_pos {
+            offset + 3 + jump
+        } else {
+            offset + 3 - jump
+        };
+        println!("{:<16} {:04} -> {:04}", format!("{:?}", instruction), offset, end);
+        offset + 3
     }
 
     fn constant_instruction(&self, instruction: OpCode, offset: usize) -> usize {

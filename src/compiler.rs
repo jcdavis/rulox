@@ -101,12 +101,12 @@ impl Compiler<'_> {
         self.current.as_ref().unwrap().token_type == token_type
     }
 
-    pub fn emit_opcode(&mut self, opcode: OpCode) {
-        self.emit_byte(num::ToPrimitive::to_u8(&opcode).unwrap());
+    pub fn emit_opcode(&mut self, opcode: OpCode) -> usize {
+        self.emit_byte(num::ToPrimitive::to_u8(&opcode).unwrap())
     }
 
-    pub fn emit_byte(& mut self, byte: u8) {
-        self.chunk.write_byte(byte, self.previous.as_ref().expect("Need prev token to emit byte").line);
+    pub fn emit_byte(& mut self, byte: u8) -> usize {
+        self.chunk.write_byte(byte, self.previous.as_ref().expect("Need prev token to emit byte").line)
     }
 
     pub fn emit_bytes(& mut self, bytes: &[u8]) {
@@ -115,10 +115,38 @@ impl Compiler<'_> {
         }
     }
 
+    pub fn emit_jump(&mut self, opcode: OpCode) -> usize {
+        self.emit_opcode(opcode);
+        let offset = self.emit_byte(0xff);
+        self.emit_byte(0xff);
+        offset
+    }
+
     pub fn emit_constant(&mut self, constant: LoxValue) {
         self.emit_opcode(OpCode::Constant);
         let constant_id = self.make_constant(constant);
         self.emit_byte(constant_id);
+    }
+
+    pub fn emit_loop(&mut self, loop_start: usize) {
+        self.emit_opcode(OpCode::Loop);
+
+        let offset = self.chunk.code_len() - loop_start + 2;
+        if offset > u16::MAX as usize {
+            self.error("Loop body too large.");
+        }
+
+        self.emit_byte((offset >> 8 & 0xff) as u8);
+        self.emit_byte((offset & 0xff) as u8);
+    }
+
+    pub fn patch_jump(&mut self, offset: usize) {
+        let jump = self.chunk.code_len() - offset - 2;
+        if jump > u16::MAX as usize {
+            self.error("Too much code to jump over.");
+        }
+        self.chunk.patch_byte((jump >> 8 & 0xff) as u8, offset);
+        self.chunk.patch_byte((jump & 0xff) as u8, offset + 1);
     }
 
     pub fn make_constant(&mut self, constant: LoxValue) -> u8 {
@@ -139,7 +167,7 @@ impl Compiler<'_> {
         self.scope_depth -= 1;
 
         let mut index = self.locals.len() - 1;
-        while self.locals.len() > 0 && self.locals.get(index).unwrap().depth > self.scope_depth {
+        while !self.locals.is_empty() && self.locals.get(index).unwrap().depth > self.scope_depth {
             self.emit_opcode(OpCode::Pop);
             self.locals.pop();
         }
@@ -153,6 +181,24 @@ impl Compiler<'_> {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after expression.");
         self.emit_opcode(OpCode::Pop);
+    }
+
+    pub fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_opcode(OpCode::Pop);
+        self.statement();
+        let else_jump = self.emit_jump(OpCode::Jump);
+        self.patch_jump(then_jump);
+        self.emit_opcode(OpCode::Pop);
+
+        if self.matches(TokenType::Else) {
+            self.statement();
+        }
+        self.patch_jump(else_jump);
     }
 
     pub fn declaration(&mut self) {
@@ -235,14 +281,36 @@ impl Compiler<'_> {
         }
 
         self.locals.push(Local {
-            name: name,
+            name,
             depth: -1,
         });
+    }
+
+    pub fn and_(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_opcode(OpCode::Pop);
+        self.parse_precedence(PRECEDENCE_AND);
+        self.patch_jump(end_jump);
+    }
+
+    pub fn or_(&mut self) {
+        let else_jump = self.emit_jump(OpCode::JumpIfFalse);
+        let end_jump = self.emit_jump(OpCode::Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_opcode(OpCode::Pop);
+
+        self.parse_precedence(PRECEDENCE_OR);
+        self.patch_jump(end_jump);
     }
 
     pub fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::If) {
+            self.if_statement();
+        } else if self.matches(TokenType::While) {
+            self.while_statement();
         } else if self.matches(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -259,10 +327,25 @@ impl Compiler<'_> {
         self.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
-    pub fn print_statement(&mut  self) {
+    pub fn print_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_opcode(OpCode::Print);
+    }
+
+    pub fn while_statement(&mut self) {
+        let loop_start = self.chunk.code_len();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_opcode(OpCode::Pop);
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit_opcode(OpCode::Pop);
     }
 
     pub fn synchronize(&mut self) {
@@ -324,7 +407,7 @@ impl Compiler<'_> {
         let result_opt = self.locals.iter()
             .enumerate()
             .rev()
-            .find(|(idx, local)| local.name.contents == *name);
+            .find(|(_idx, local)| local.name.contents == *name);
 
         result_opt.map(|(index, local)| {
             if local.depth == -1 {
@@ -338,8 +421,8 @@ impl Compiler<'_> {
         let operator_type = self.previous.as_ref().unwrap().token_type;
         self.parse_precedence(PRECEDENCE_UNARY);
         match operator_type {
-            TokenType::Minus => self.emit_opcode(OpCode::Negate),
-            TokenType::Bang => self.emit_opcode(OpCode::Not),
+            TokenType::Minus => { self.emit_opcode(OpCode::Negate); },
+            TokenType::Bang => { self.emit_opcode(OpCode::Not); },
             _ => (),
         }
     }
@@ -354,21 +437,21 @@ impl Compiler<'_> {
                 self.emit_opcode(OpCode::Equal);
                 self.emit_opcode(OpCode::Not);
             },
-            TokenType::EqualEqual => self.emit_opcode(OpCode::Equal),
-            TokenType::Greater => self.emit_opcode(OpCode::Greater),
+            TokenType::EqualEqual => { self.emit_opcode(OpCode::Equal); },
+            TokenType::Greater => { self.emit_opcode(OpCode::Greater); },
             TokenType::GreaterEqual => {
                 self.emit_opcode(OpCode::Less);
                 self.emit_opcode(OpCode::Not);
             },
-            TokenType::Less => self.emit_opcode(OpCode::Less),
+            TokenType::Less => {self.emit_opcode(OpCode::Less); } ,
             TokenType::LessEqual => {
                 self.emit_opcode(OpCode::Greater);
                 self.emit_opcode(OpCode::Not);
             },
-            TokenType::Plus => self.emit_opcode(OpCode::Add),
-            TokenType::Minus => self.emit_opcode(OpCode::Subtract),
-            TokenType::Star => self.emit_opcode(OpCode::Multiply),
-            TokenType::Slash => self.emit_opcode(OpCode::Divide),
+            TokenType::Plus => { self.emit_opcode(OpCode::Add); },
+            TokenType::Minus => { self.emit_opcode(OpCode::Subtract); },
+            TokenType::Star => { self.emit_opcode(OpCode::Multiply); },
+            TokenType::Slash => { self.emit_opcode(OpCode::Divide); },
             _ => (),
         }
     }
@@ -379,7 +462,7 @@ impl Compiler<'_> {
             Some(TokenType::True) => self.emit_opcode(OpCode::True),
             Some(TokenType::False) => self.emit_opcode(OpCode::False),
             _ => panic!("Unexpected literal {:?}", self.previous),
-        }
+        };
     }
 
     pub fn parse_precedence(&mut self, precedence: Precedence) {
@@ -414,6 +497,8 @@ impl Compiler<'_> {
             TokenType::Minus | TokenType::Plus | TokenType::Slash | TokenType::Star => self.binary(),
             TokenType::BangEqual | TokenType::EqualEqual | TokenType::Greater | TokenType::GreaterEqual |
                 TokenType::Less | TokenType::LessEqual => self.binary(),
+            TokenType::And => self.and_(),
+            TokenType::Or => self.or_(),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
         }
      }
@@ -424,6 +509,8 @@ impl Compiler<'_> {
             TokenType::Slash | TokenType::Star => PRECEDENCE_FACTOR,
             TokenType::BangEqual | TokenType::EqualEqual => PRECEDENCE_EQUALITY,
             TokenType::Greater | TokenType::GreaterEqual | TokenType::Less | TokenType::LessEqual => PRECEDENCE_COMPARISON,
+            TokenType::And => PRECEDENCE_AND,
+            TokenType::Or => PRECEDENCE_OR,
             _ => PRECEDENCE_NONE,
         }
      }

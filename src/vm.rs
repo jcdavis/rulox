@@ -208,6 +208,20 @@ impl VM<'_> {
                 OpCode::Print => {
                     println!("{:?}", self.pop());
                 }
+                OpCode::Jump => {
+                    let offset = self.read_short();
+                    self.offset += offset as usize;
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = self.read_short();
+                    if self.is_falsey(self.peek(0)) {
+                        self.offset += offset as usize;
+                    }
+                },
+                OpCode::Loop => {
+                    let offset = self.read_short();
+                    self.offset -= offset as usize;
+                }
                 OpCode::Return => {
                     return 0;
                 },
@@ -254,6 +268,10 @@ impl VM<'_> {
         let byte = self.chunk.read_byte(self.offset);
         self.offset += 1;
         byte
+    }
+
+    fn read_short(&mut self) -> u16 {
+        ((self.read_byte() as u16) << 8) + (self.read_byte() as u16)
     }
 
     fn runtime_error(&self, msg: &str) {
