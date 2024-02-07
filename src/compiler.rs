@@ -309,6 +309,8 @@ impl Compiler<'_> {
             self.print_statement();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::For) {
+            self.for_statement();
         } else if self.matches(TokenType::While) {
             self.while_statement();
         } else if self.matches(TokenType::LeftBrace) {
@@ -331,6 +333,52 @@ impl Compiler<'_> {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_opcode(OpCode::Print);
+    }
+
+    pub fn for_statement(&mut self) {
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if self.matches(TokenType::Semicolon) {
+            // no initializer
+        } else if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.chunk.code_len();
+        let exit_jump = if !self.matches(TokenType::Semicolon) {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';'.");
+
+            // Jump out of the loop if the condition is false.
+            let jump = self.emit_jump(OpCode::JumpIfFalse);
+            self.emit_opcode(OpCode::Pop);
+            Some(jump)
+        } else {
+            None
+        };
+
+        if !self.matches(TokenType::RightParen) {
+            let body_jump = self.emit_jump(OpCode::Jump);
+            let increment_start = self.chunk.code_len();
+            self.expression();
+            self.emit_opcode(OpCode::Pop);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        if let Some(exit) = exit_jump {
+            self.patch_jump(exit);
+            self.emit_opcode(OpCode::Pop);
+        }
+        self.end_scope();
     }
 
     pub fn while_statement(&mut self) {
