@@ -34,6 +34,7 @@ pub enum OpCode {
     Return,
 }
 
+#[derive(Debug)]
 pub struct Chunk {
     code: Vec<u8>,
     constants: Vec<LoxValue>,

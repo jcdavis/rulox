@@ -2,26 +2,53 @@ extern crate num;
 
 use std::{rc::Rc, collections::HashMap};
 
-use crate::{chunk, value::LoxValue};
+use crate::{chunk, value::{LoxValue, LoxFunction}};
 use chunk::{Chunk, OpCode};
 
-pub struct VM<'a> {
-    chunk: &'a Chunk,
-    offset: usize,
+struct CallFrame {
+    function: LoxFunction,
+    ip: usize,
+    stack_offset: usize,
+}
+
+impl CallFrame {
+    fn read_constant(&mut self) -> &LoxValue {
+        let new_offset = self.read_byte() as usize;
+        self.function.chunk.read_constant(new_offset)
+    }
+
+    fn read_byte(&mut self) -> u8 {
+        let byte = self.function.chunk.read_byte(self.ip);
+        self.ip += 1;
+        byte
+    }
+
+    fn read_short(&mut self) -> u16 {
+        ((self.read_byte() as u16) << 8) + (self.read_byte() as u16)
+    }
+}
+
+pub struct VM {
     debug: bool,
+    frames: Vec<CallFrame>,
     stack: Vec<LoxValue>,
     globals: HashMap<String, LoxValue>,
 }
 
-impl VM<'_> {
-    pub fn new(chunk: &Chunk) -> VM {
-        VM {
-            chunk,
-            offset: 0,
+impl VM {
+    pub fn new(script: LoxFunction) -> VM {
+        let mut vm = VM {
             debug: false,
+            frames: Vec::new(),
             stack: Vec::new(),
             globals: HashMap::new(),
-        }
+        };
+        vm.frames.push(CallFrame {
+            function: script,
+            ip: 0,
+            stack_offset: 0,
+        });
+        vm
     }
 
     pub fn debug(&mut self) {
@@ -32,12 +59,12 @@ impl VM<'_> {
         loop {
             if self.debug {
                 println!("{:?}", self.stack);
-                self.chunk.disassemble_instruction(self.offset);
+                self.get_current_frame().function.chunk.disassemble_instruction(self.get_current_ip());
             }
-            let inst: OpCode = num::FromPrimitive::from_u8(self.read_byte()).unwrap();
+            let inst: OpCode = num::FromPrimitive::from_u8(self.get_current_frame_mut().read_byte()).unwrap();
             match inst {
                 OpCode::Constant => {
-                    let constant = self.read_constant().clone();
+                    let constant = self.get_current_frame_mut().read_constant().clone();
                     self.push(constant);
                 },
                 OpCode::Nil => self.push(LoxValue::Nil),
@@ -45,15 +72,16 @@ impl VM<'_> {
                 OpCode::False => self.push(LoxValue::Bool(false)),
                 OpCode::Pop => { self.pop(); },
                 OpCode::GetLocal => {
-                    let slot = self.read_byte();
-                    self.push(self.stack[slot as usize].clone());
+                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset;
+
+                    self.push(self.stack[slot].clone());
                 },
                 OpCode::SetLocal => {
-                    let slot = self.read_byte();
-                    self.stack[slot as usize] = self.peek(0).clone();
+                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset;
+                    self.stack[slot] = self.peek(0).clone();
                 },
                 OpCode::GetGlobal => {
-                    match self.read_constant().as_string() {
+                    match self.get_current_frame_mut().read_constant().as_string() {
                         Some(name) => {
                             match self.globals.get(&name) {
                                 Some(value) => self.push(value.clone()),
@@ -70,7 +98,7 @@ impl VM<'_> {
                     }
                 },
                 OpCode::DefineGlobal => {
-                    match self.read_constant().as_string() {
+                    match self.get_current_frame_mut().read_constant().as_string() {
                         Some(name) => {
                             let value = self.pop();
                             self.globals.insert(name, value);
@@ -82,7 +110,7 @@ impl VM<'_> {
                     }
                 },
                 OpCode::SetGlobal => {
-                    match self.read_constant().as_string() {
+                    match self.get_current_frame_mut().read_constant().as_string() {
                         Some(name) => {
                             let value = self.peek(0).clone();
                             if self.globals.contains_key(&name) {
@@ -209,18 +237,18 @@ impl VM<'_> {
                     println!("{:?}", self.pop());
                 }
                 OpCode::Jump => {
-                    let offset = self.read_short();
-                    self.offset += offset as usize;
+                    let offset = self.get_current_frame_mut().read_short();
+                    self.get_current_frame_mut().ip += offset as usize;
                 }
                 OpCode::JumpIfFalse => {
-                    let offset = self.read_short();
+                    let offset = self.get_current_frame_mut().read_short();
                     if self.is_falsey(self.peek(0)) {
-                        self.offset += offset as usize;
+                        self.get_current_frame_mut().ip += offset as usize;
                     }
                 },
                 OpCode::Loop => {
-                    let offset = self.read_short();
-                    self.offset -= offset as usize;
+                    let offset = self.get_current_frame_mut().read_short();
+                    self.get_current_frame_mut().ip -= offset as usize;
                 }
                 OpCode::Return => {
                     return 0;
@@ -245,7 +273,7 @@ impl VM<'_> {
         match value {
             LoxValue::Nil => true,
             LoxValue::Bool(b) => !b,
-            LoxValue::Double(_) | LoxValue::String(_) => false,
+            LoxValue::Double(_) | LoxValue::String(_) | LoxValue::Function(_) => false,
         }
     }
 
@@ -259,24 +287,23 @@ impl VM<'_> {
         }
     }
 
-    fn read_constant(&mut self) -> &LoxValue {
-        let new_offset = self.read_byte() as usize;
-        self.chunk.read_constant(new_offset)
-    }
-
-    fn read_byte(&mut self) -> u8 {
-        let byte = self.chunk.read_byte(self.offset);
-        self.offset += 1;
-        byte
-    }
-
-    fn read_short(&mut self) -> u16 {
-        ((self.read_byte() as u16) << 8) + (self.read_byte() as u16)
-    }
-
     fn runtime_error(&self, msg: &str) {
         println!("{}", msg);
-        let line = self.chunk.line_at(self.offset - 1);
+        let line = self.get_current_frame().function.chunk.line_at(self.get_current_ip() - 1);
         println!("[line {}] in script", line);
+    }
+
+    fn get_current_ip(&self) -> usize {
+        self.frames[self.frames.len()-1].ip
+    }
+
+    fn get_current_frame(&self) -> &CallFrame {
+        let last = self.frames.len()-1;
+        &self.frames[last]
+    }
+
+    fn get_current_frame_mut(&mut self) -> &mut CallFrame {
+        let last = self.frames.len()-1;
+        &mut self.frames[last]
     }
 }

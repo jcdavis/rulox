@@ -1,12 +1,22 @@
 
 use std::rc::Rc;
 
+use crate::chunk::Chunk;
+
 #[derive(Clone, Debug)]
 pub enum LoxValue {
     Bool(bool),
     Double(f64),
     String(Rc<String>),
+    Function(Rc<LoxFunction>),
     Nil,
+}
+
+#[derive(Debug)]
+pub struct LoxFunction {
+    pub name: Option<String>,
+    pub arity: usize,
+    pub chunk: Chunk,
 }
 
 impl LoxValue {

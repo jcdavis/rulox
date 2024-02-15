@@ -8,6 +8,7 @@ mod vm;
 
 use compiler::compile;
 
+use value::LoxFunction;
 use vm::VM;
 use std::{fs, io, env};
 
@@ -25,8 +26,8 @@ fn file(file_name: &str) {
 }
 
 fn interpret(source: &str) {
-    let chunk = compile(source).expect("error parsing");
-    let mut vm = VM::new(&chunk);
+    let script: LoxFunction = compile(source).expect("error parsing");
+    let mut vm = VM::new(script);
     vm.run();
 }
 

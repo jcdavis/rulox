@@ -1,18 +1,24 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{chunk::{self, Chunk, OpCode}, value::LoxValue, scanner::{self, Scanner}};
+use crate::{chunk::{self, Chunk, OpCode}, value::{LoxFunction, LoxValue}, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
 
 struct Compiler<'a> {
     scanner: Scanner<'a>,
     previous: Option<Token>,
     current: Option<Token>,
-    chunk: chunk::Chunk,
     had_error: RefCell<bool>,
     panic_mode: RefCell<bool>,
     locals: Vec<Local>,
     scope_depth: i32,
+    function: LoxFunction,
+    function_type: FunctionType,
+}
+
+enum FunctionType {
+    Function,
+    Script,
 }
 
 struct Local {
@@ -34,9 +40,9 @@ const PRECEDENCE_UNARY: Precedence = 8;
 const PRECEDENCE_CALL: Precedence = 9;
 const PRECEDENCE_PRIMARY: Precedence = 10;
 
-pub fn compile(source: &str) -> Option<Chunk> {
+pub fn compile(source: &str) -> Option<LoxFunction> {
     let scanner = scanner::Scanner::new(source);
-    let mut compiler = Compiler::new(scanner);
+    let mut compiler = Compiler::new(scanner, FunctionType::Script);
     compiler.advance();
 
     while !compiler.matches(TokenType::Eof) {
@@ -48,22 +54,36 @@ pub fn compile(source: &str) -> Option<Chunk> {
     if *compiler.had_error.borrow() {
         None
     } else {
-        Some(compiler.chunk)
+        Some(compiler.function)
     }
 }
 
 impl Compiler<'_> {
-    pub fn new(scanner: Scanner) -> Compiler {
-        Compiler {
+    pub fn new(scanner: Scanner, function_type: FunctionType) -> Compiler {
+        let mut c = Compiler {
             scanner,
             previous: None,
             current: None,
-            chunk: chunk::Chunk::new(),
             had_error: RefCell::new(false),
             panic_mode: RefCell::new(false),
             locals: Vec::new(),
             scope_depth: 0,
-        }
+            function: LoxFunction {
+                name: None,
+                arity: 0,
+                chunk: Chunk::new(),
+            },
+            function_type,
+        };
+       /*c.locals.push(Local {
+            name: Token {
+                token_type: TokenType::Error,
+                contents: "".to_string(),
+                line: 0,
+            },
+            depth: 0
+        });*/
+        c
     }
 
     pub fn advance(&mut self) {
@@ -106,12 +126,12 @@ impl Compiler<'_> {
     }
 
     pub fn emit_byte(& mut self, byte: u8) -> usize {
-        self.chunk.write_byte(byte, self.previous.as_ref().expect("Need prev token to emit byte").line)
+        self.function.chunk.write_byte(byte, self.previous.as_ref().expect("Need prev token to emit byte").line)
     }
 
     pub fn emit_bytes(& mut self, bytes: &[u8]) {
         for byte in bytes {
-            self.chunk.write_byte(*byte, self.previous.as_ref().expect("Need prev token to emit byte").line);
+            self.function.chunk.write_byte(*byte, self.previous.as_ref().expect("Need prev token to emit byte").line);
         }
     }
 
@@ -131,7 +151,7 @@ impl Compiler<'_> {
     pub fn emit_loop(&mut self, loop_start: usize) {
         self.emit_opcode(OpCode::Loop);
 
-        let offset = self.chunk.code_len() - loop_start + 2;
+        let offset = self.function.chunk.code_len() - loop_start + 2;
         if offset > u16::MAX as usize {
             self.error("Loop body too large.");
         }
@@ -141,22 +161,22 @@ impl Compiler<'_> {
     }
 
     pub fn patch_jump(&mut self, offset: usize) {
-        let jump = self.chunk.code_len() - offset - 2;
+        let jump = self.function.chunk.code_len() - offset - 2;
         if jump > u16::MAX as usize {
             self.error("Too much code to jump over.");
         }
-        self.chunk.patch_byte((jump >> 8 & 0xff) as u8, offset);
-        self.chunk.patch_byte((jump & 0xff) as u8, offset + 1);
+        self.function.chunk.patch_byte((jump >> 8 & 0xff) as u8, offset);
+        self.function.chunk.patch_byte((jump & 0xff) as u8, offset + 1);
     }
 
     pub fn make_constant(&mut self, constant: LoxValue) -> u8 {
         // Handle Constant pool overlfow?
-        self.chunk.add_constant(constant)
+        self.function.chunk.add_constant(constant)
     }
 
     pub fn end_compiler(&mut self) {
         self.emit_opcode(OpCode::Return);
-        self.chunk.disassemble("code");
+        self.function.chunk.disassemble(self.function.name.as_deref().unwrap_or("code"));
     }
 
     pub fn begin_scope(&mut self) {
@@ -253,7 +273,7 @@ impl Compiler<'_> {
     }
 
     pub fn identifier_constant(&mut self, name: String) -> u8 {
-        self.chunk.add_constant(LoxValue::String(Rc::new(name)))
+        self.function.chunk.add_constant(LoxValue::String(Rc::new(name)))
     }
 
     pub fn declare_variable(&mut self) {
@@ -346,7 +366,7 @@ impl Compiler<'_> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.chunk.code_len();
+        let mut loop_start = self.function.chunk.code_len();
         let exit_jump = if !self.matches(TokenType::Semicolon) {
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';'.");
@@ -361,7 +381,7 @@ impl Compiler<'_> {
 
         if !self.matches(TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
-            let increment_start = self.chunk.code_len();
+            let increment_start = self.function.chunk.code_len();
             self.expression();
             self.emit_opcode(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
@@ -382,7 +402,7 @@ impl Compiler<'_> {
     }
 
     pub fn while_statement(&mut self) {
-        let loop_start = self.chunk.code_len();
+        let loop_start = self.function.chunk.code_len();
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
