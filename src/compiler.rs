@@ -1,11 +1,11 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 use crate::{chunk::{self, Chunk, OpCode}, value::{LoxFunction, LoxValue}, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
 
 struct Compiler<'a> {
-    scanner: Scanner<'a>,
+    scanner: Rc<RefCell<Scanner<'a>>>,
     previous: Option<Token>,
     current: Option<Token>,
     had_error: RefCell<bool>,
@@ -59,7 +59,7 @@ pub fn compile(source: &str) -> Option<LoxFunction> {
 }
 
 impl Compiler<'_> {
-    pub fn new(scanner: Scanner, function_type: FunctionType) -> Compiler {
+    fn construct(scanner: Rc<RefCell<Scanner>>, function_type: FunctionType) -> Compiler {
         let mut c = Compiler {
             scanner,
             previous: None,
@@ -86,11 +86,14 @@ impl Compiler<'_> {
         c
     }
 
+    pub fn new(scanner: Scanner, function_type: FunctionType) -> Compiler {
+        Self::construct(Rc::new(RefCell::new(scanner)), function_type)
+    }
+
     pub fn advance(&mut self) {
         self.previous = self.current.take();
-
         loop {
-            self.current = Some(self.scanner.scan_token());
+            self.current = Some(self.scanner.borrow_mut().scan_token());
             let current_token = self.current.as_ref().expect("?");
             if current_token.token_type == TokenType::Error {
                 self.error_at_current(current_token.contents.as_str());
@@ -104,6 +107,7 @@ impl Compiler<'_> {
         if self.current.as_ref().is_some_and(|c| c.token_type == expected) {
             self.advance();
         } else {
+            panic!("{}",error_message);
             self.error_at_current(error_message);
         }
     }
@@ -222,7 +226,9 @@ impl Compiler<'_> {
     }
 
     pub fn declaration(&mut self) {
-        if self.matches(TokenType::Var) {
+        if self.matches(TokenType::Fun) {
+            self.fun_declaration();
+        } else if self.matches(TokenType::Var) {
             self.var_declaration();
         } else {
             self.statement();
@@ -231,6 +237,13 @@ impl Compiler<'_> {
         if *self.panic_mode.borrow() {
             self.synchronize();
         }
+    }
+
+    pub fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function mame");
+        self.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
     }
 
     pub fn var_declaration(&mut self) {
@@ -268,6 +281,9 @@ impl Compiler<'_> {
     }
 
     pub fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
         let last_idx = self.locals.len() - 1;
         self.locals[last_idx].depth = self.scope_depth;
     }
@@ -347,6 +363,35 @@ impl Compiler<'_> {
             self.declaration();
         }
         self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    pub fn function(&mut self, function_type: FunctionType) {
+        let mut fn_compiler = Self::construct(Rc::clone(&self.scanner), function_type);
+        fn_compiler.function.name = Some(self.previous.as_ref().unwrap().contents.clone());
+        fn_compiler.previous = self.previous.clone();
+        fn_compiler.current = self.current.clone();
+        fn_compiler.begin_scope();
+        fn_compiler.consume(TokenType::LeftParen, "Expect '(' after function name.");
+        if !fn_compiler.check(TokenType::RightParen) {
+            loop {
+                fn_compiler.function.arity += 1;
+                let constant = fn_compiler.parse_variable("Expect parameter name.");
+                fn_compiler.define_variable(constant);
+                if !self.matches(TokenType::Comma) {
+                    break;;
+                }
+            }
+        }
+        fn_compiler.consume(TokenType::RightParen, "Expect ')' after parameters.");
+        fn_compiler.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+        fn_compiler.block();
+        fn_compiler.end_compiler();
+
+        // How should we be handling error propogation??
+        self.previous = fn_compiler.previous.take();
+        self.current = fn_compiler.current.take();
+        let fn_obj = fn_compiler.function;
+        self.emit_constant(LoxValue::Function(Rc::new(fn_obj)));
     }
 
     pub fn print_statement(&mut self) {
