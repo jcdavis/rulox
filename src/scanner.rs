@@ -7,6 +7,8 @@ pub struct Scanner<'a> {
     next: Option<char>,
     buffer: String,
     line: u32,
+    current_token: Option<Token>,
+    previous_token: Option<Token>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
@@ -50,10 +52,17 @@ impl Scanner<'_> {
             next,
             buffer: String::new(),
             line: 1,
+            current_token: None,
+            previous_token: None,
         }
     }
 
-    pub fn scan_token(&mut self) -> Token {
+    pub fn advance_token(&mut self) {
+        self.previous_token = self.current_token.take();
+        self.current_token = Some(self.scan_token());
+    }
+
+    fn scan_token(&mut self) -> Token {
         self.skip_whitespace();
         self.buffer.clear();
         if self.is_at_end() {
@@ -245,5 +254,13 @@ impl Scanner<'_> {
 
     fn peek_next(&self) -> Option<char> {
         self.next
+    }
+
+    pub fn previous_token(&self) -> Option<&Token> {
+        self.previous_token.as_ref()
+    }
+
+    pub fn current_token(&self) -> Option<&Token> {
+        self.current_token.as_ref()
     }
 }

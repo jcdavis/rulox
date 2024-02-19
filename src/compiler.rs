@@ -6,8 +6,6 @@ use scanner::{Token, TokenType};
 
 struct Compiler<'a> {
     scanner: Rc<RefCell<Scanner<'a>>>,
-    previous: Option<Token>,
-    current: Option<Token>,
     had_error: RefCell<bool>,
     panic_mode: RefCell<bool>,
     locals: Vec<Local>,
@@ -62,8 +60,6 @@ impl Compiler<'_> {
     fn construct(scanner: Rc<RefCell<Scanner>>, function_type: FunctionType) -> Compiler {
         let mut c = Compiler {
             scanner,
-            previous: None,
-            current: None,
             had_error: RefCell::new(false),
             panic_mode: RefCell::new(false),
             locals: Vec::new(),
@@ -91,10 +87,10 @@ impl Compiler<'_> {
     }
 
     pub fn advance(&mut self) {
-        self.previous = self.current.take();
         loop {
-            self.current = Some(self.scanner.borrow_mut().scan_token());
-            let current_token = self.current.as_ref().expect("?");
+            let mut scanner = self.scanner.borrow_mut();
+            scanner.advance_token();
+            let current_token = scanner.current_token().expect("?");
             if current_token.token_type == TokenType::Error {
                 self.error_at_current(current_token.contents.as_str());
             } else {
@@ -104,7 +100,7 @@ impl Compiler<'_> {
     }
 
     pub fn consume(&mut self, expected: TokenType, error_message: &str) {
-        if self.current.as_ref().is_some_and(|c| c.token_type == expected) {
+        if self.scanner.borrow().current_token().is_some_and(|c| c.token_type == expected) {
             self.advance();
         } else {
             panic!("{}",error_message);
@@ -122,7 +118,7 @@ impl Compiler<'_> {
     }
 
     pub fn check(&self, token_type: TokenType) -> bool {
-        self.current.as_ref().unwrap().token_type == token_type
+        self.scanner.borrow().current_token().unwrap().token_type == token_type
     }
 
     pub fn emit_opcode(&mut self, opcode: OpCode) -> usize {
@@ -130,12 +126,12 @@ impl Compiler<'_> {
     }
 
     pub fn emit_byte(& mut self, byte: u8) -> usize {
-        self.function.chunk.write_byte(byte, self.previous.as_ref().expect("Need prev token to emit byte").line)
+        self.function.chunk.write_byte(byte, self.scanner.borrow().previous_token().expect("Need prev token to emit byte").line)
     }
 
     pub fn emit_bytes(& mut self, bytes: &[u8]) {
         for byte in bytes {
-            self.function.chunk.write_byte(*byte, self.previous.as_ref().expect("Need prev token to emit byte").line);
+            self.function.chunk.write_byte(*byte, self.scanner.borrow().previous_token().expect("Need prev token to emit byte").line);
         }
     }
 
@@ -193,6 +189,7 @@ impl Compiler<'_> {
         let mut index = self.locals.len() - 1;
         while !self.locals.is_empty() && self.locals.get(index).unwrap().depth > self.scope_depth {
             self.emit_opcode(OpCode::Pop);
+            index -= 1;
             self.locals.pop();
         }
     }
@@ -266,7 +263,7 @@ impl Compiler<'_> {
             return 0;
         }
 
-        let var_name = self.previous.as_ref().unwrap().contents.clone();
+        let var_name = self.scanner.borrow().previous_token().unwrap().contents.clone();
         self.identifier_constant(var_name)
     }
 
@@ -297,7 +294,7 @@ impl Compiler<'_> {
             return;
         }
 
-        let name = self.previous.as_ref().unwrap().clone();
+        let name = self.scanner.borrow().previous_token().unwrap().clone();
         for local in self.locals.iter().rev() {
             if local.depth != -1 && local.depth < self.scope_depth {
                 break;
@@ -367,9 +364,7 @@ impl Compiler<'_> {
 
     pub fn function(&mut self, function_type: FunctionType) {
         let mut fn_compiler = Self::construct(Rc::clone(&self.scanner), function_type);
-        fn_compiler.function.name = Some(self.previous.as_ref().unwrap().contents.clone());
-        fn_compiler.previous = self.previous.clone();
-        fn_compiler.current = self.current.clone();
+        fn_compiler.function.name = Some(self.scanner.borrow().previous_token().unwrap().contents.clone());
         fn_compiler.begin_scope();
         fn_compiler.consume(TokenType::LeftParen, "Expect '(' after function name.");
         if !fn_compiler.check(TokenType::RightParen) {
@@ -388,8 +383,6 @@ impl Compiler<'_> {
         fn_compiler.end_compiler();
 
         // How should we be handling error propogation??
-        self.previous = fn_compiler.previous.take();
-        self.current = fn_compiler.current.take();
         let fn_obj = fn_compiler.function;
         self.emit_constant(LoxValue::Function(Rc::new(fn_obj)));
     }
@@ -463,11 +456,11 @@ impl Compiler<'_> {
 
     pub fn synchronize(&mut self) {
         *self.panic_mode.borrow_mut() = false;
-        while self.current.as_ref().map(|t| t.token_type) != Some(TokenType::Eof) {
-            if self.previous.as_ref().map(|t| t.token_type) == Some(TokenType::Semicolon) {
+        while self.scanner.borrow().current_token().map(|t| t.token_type) != Some(TokenType::Eof) {
+            if self.scanner.borrow().previous_token().map(|t| t.token_type) == Some(TokenType::Semicolon) {
                 return;
             }
-            match self.current.as_ref().map(|t| t.token_type) {
+            match self.scanner.borrow().current_token().map(|t| t.token_type) {
                 Some(TokenType::Class) | Some(TokenType::Fun) | Some(TokenType::Var) | Some(TokenType::For) | Some(TokenType::Fun) |
                     Some(TokenType::If) | Some(TokenType::While) | Some(TokenType::Print) | Some(TokenType::Return) => return,
                 _ => ()
@@ -482,21 +475,28 @@ impl Compiler<'_> {
     }
 
     pub fn number(&mut self) {
-        let str = &self.previous.as_ref().unwrap().contents;
-        let parsed = str.parse::<f64>();
+        let parsed = {
+            let binding = self.scanner.borrow();
+            let str = &binding.previous_token().unwrap().contents;
+            str.parse::<f64>()
+        };
         match parsed {
             Ok(double) => self.emit_constant(LoxValue::Double(double)),
-            Err(_err) => self.error(format!("Unable to parse {}", str).as_str()),
-        }
+            Err(_err) => {
+                let binding = self.scanner.borrow();
+                let workaround = &binding.previous_token().unwrap().contents;
+                self.error(format!("Unable to parse {}", workaround).as_str());
+            },
+        };
     }
 
     pub fn string(&mut self) {
-        let cloned_contents = self.previous.as_ref().unwrap().contents.clone();
+        let cloned_contents = self.scanner.borrow().previous_token().unwrap().contents.clone();
         self.emit_constant(LoxValue::String(Rc::new(cloned_contents)));
     }
 
     pub fn variable(&mut self, can_assign: bool) {
-        let name = self.previous.as_ref().unwrap().contents.clone();
+        let name = self.scanner.borrow().previous_token().unwrap().contents.clone();
         self.named_variable(name, can_assign);
     }
 
@@ -531,7 +531,7 @@ impl Compiler<'_> {
     }
 
     pub fn unary(&mut self) {
-        let operator_type = self.previous.as_ref().unwrap().token_type;
+        let operator_type = self.scanner.borrow().previous_token().unwrap().token_type;
         self.parse_precedence(PRECEDENCE_UNARY);
         match operator_type {
             TokenType::Minus => { self.emit_opcode(OpCode::Negate); },
@@ -541,7 +541,7 @@ impl Compiler<'_> {
     }
 
     pub fn binary(&mut self) {
-        let operator_type = self.previous.as_ref().unwrap().token_type;
+        let operator_type = self.scanner.borrow().previous_token().unwrap().token_type;
         let precedence = self.get_precedence(operator_type);
         self.parse_precedence(precedence + 1); // +1 somehow
 
@@ -570,27 +570,30 @@ impl Compiler<'_> {
     }
 
     pub fn literal(&mut self) {
-        match self.previous.as_ref().map(|f| f.token_type) {
+        let token_type = self.scanner.borrow().previous_token().map(|f| f.token_type);
+        match token_type {
             Some(TokenType::Nil) => self.emit_opcode(OpCode::Nil),
             Some(TokenType::True) => self.emit_opcode(OpCode::True),
             Some(TokenType::False) => self.emit_opcode(OpCode::False),
-            _ => panic!("Unexpected literal {:?}", self.previous),
+            _ => panic!("Unexpected literal {:?}", self.scanner.borrow().previous_token()),
         };
     }
 
     pub fn parse_precedence(&mut self, precedence: Precedence) {
         self.advance();
         let can_assign = precedence <= PRECEDENCE_ASSIGNMENT;
-        self.do_prefix(self.previous.as_ref().unwrap().token_type, can_assign);
+        let token_type = self.scanner.borrow().previous_token().unwrap().token_type;
+        self.do_prefix(token_type, can_assign);
 
-        while precedence <= self.get_precedence(self.current.as_ref().unwrap().token_type) {
+        while precedence <= self.get_precedence(self.scanner.borrow().current_token().unwrap().token_type) {
             self.advance();
-            self.do_infix(self.previous.as_ref().unwrap().token_type);
+            let token_type = self.scanner.borrow().previous_token().unwrap().token_type;
+            self.do_infix(token_type);
 
             if can_assign && self.matches(TokenType::Equal) {
                 self.error("Invalid assignment target");
             }
-        }
+        };
     }
 
      pub fn do_prefix(&mut self, token_type: TokenType, can_assign: bool) {
@@ -616,7 +619,7 @@ impl Compiler<'_> {
         }
      }
 
-     pub fn get_precedence(&mut self, token_type: TokenType) -> Precedence {
+     pub fn get_precedence(&self, token_type: TokenType) -> Precedence {
         match token_type {
             TokenType::Minus | TokenType::Plus => PRECEDENCE_TERM,
             TokenType::Slash | TokenType::Star => PRECEDENCE_FACTOR,
@@ -629,20 +632,19 @@ impl Compiler<'_> {
      }
 
     fn error_at_current(&self, message: &str) {
-        self.error_at(&self.current, message);
+        self.error_at(self.scanner.borrow().current_token(), message);
     }
 
     fn error(&self, message: &str) {
-        let token = &self.previous;
-        self.error_at(token, message);
+        self.error_at(self.scanner.borrow().previous_token(), message);
     }
 
-    fn error_at(&self, token: &Option<Token>, message: &str) {
+    fn error_at(&self, token: Option<&Token>, message: &str) {
         if *self.panic_mode.borrow() {
             return;
         }
         *self.panic_mode.borrow_mut() = true;
-        let unwrapped = token.as_ref().expect("Reporting error on empty token?");
+        let unwrapped = token.expect("Reporting error on empty token?");
         print!("[Line {}] Error", unwrapped.line);
 
         match unwrapped.token_type {
