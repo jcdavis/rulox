@@ -1,7 +1,7 @@
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{chunk::{self, Chunk, OpCode}, value::{LoxFunction, LoxValue}, scanner::{self, Scanner}};
+use crate::{chunk::{Chunk, OpCode}, value::{LoxFunction, LoxValue}, scanner::{self, Scanner}};
 use scanner::{Token, TokenType};
 
 struct Compiler<'a> {
@@ -103,7 +103,9 @@ impl Compiler<'_> {
         if self.scanner.borrow().current_token().is_some_and(|c| c.token_type == expected) {
             self.advance();
         } else {
-            panic!("{}",error_message);
+            //let binding = self.scanner.borrow();
+            //let current = binding.current_token().unwrap();
+            // panic!("{} at {}, which is {:?}",error_message, current.line, current);
             self.error_at_current(error_message);
         }
     }
@@ -186,10 +188,8 @@ impl Compiler<'_> {
     pub fn end_scope(&mut self) {
         self.scope_depth -= 1;
 
-        let mut index = self.locals.len() - 1;
-        while !self.locals.is_empty() && self.locals.get(index).unwrap().depth > self.scope_depth {
+        while !self.locals.is_empty() && self.locals.last().unwrap().depth > self.scope_depth {
             self.emit_opcode(OpCode::Pop);
-            index -= 1;
             self.locals.pop();
         }
     }
@@ -373,7 +373,7 @@ impl Compiler<'_> {
                 let constant = fn_compiler.parse_variable("Expect parameter name.");
                 fn_compiler.define_variable(constant);
                 if !self.matches(TokenType::Comma) {
-                    break;;
+                    break;
                 }
             }
         }
@@ -382,6 +382,7 @@ impl Compiler<'_> {
         fn_compiler.block();
         fn_compiler.end_compiler();
 
+        // End scope??
         // How should we be handling error propogation??
         let fn_obj = fn_compiler.function;
         self.emit_constant(LoxValue::Function(Rc::new(fn_obj)));
@@ -569,6 +570,30 @@ impl Compiler<'_> {
         }
     }
 
+    pub fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_opcode(OpCode::Call);
+        self.emit_byte(arg_count);
+    }
+
+    pub fn argument_list(&mut self) -> u8 {
+        let mut arg_count: u8 = 0;
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == 255 {
+                    self.error("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
+    }
+
     pub fn literal(&mut self) {
         let token_type = self.scanner.borrow().previous_token().map(|f| f.token_type);
         match token_type {
@@ -610,6 +635,7 @@ impl Compiler<'_> {
 
      pub fn do_infix(&mut self, token_type: TokenType) {
         match token_type {
+            TokenType::LeftParen => self.call(),
             TokenType::Minus | TokenType::Plus | TokenType::Slash | TokenType::Star => self.binary(),
             TokenType::BangEqual | TokenType::EqualEqual | TokenType::Greater | TokenType::GreaterEqual |
                 TokenType::Less | TokenType::LessEqual => self.binary(),
@@ -621,6 +647,7 @@ impl Compiler<'_> {
 
      pub fn get_precedence(&self, token_type: TokenType) -> Precedence {
         match token_type {
+            TokenType::LeftParen => PRECEDENCE_CALL,
             TokenType::Minus | TokenType::Plus => PRECEDENCE_TERM,
             TokenType::Slash | TokenType::Star => PRECEDENCE_FACTOR,
             TokenType::BangEqual | TokenType::EqualEqual => PRECEDENCE_EQUALITY,

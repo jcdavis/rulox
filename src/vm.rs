@@ -6,7 +6,7 @@ use crate::{chunk, value::{LoxValue, LoxFunction}};
 use chunk::{Chunk, OpCode};
 
 struct CallFrame {
-    function: LoxFunction,
+    function: Rc<LoxFunction>,
     ip: usize,
     stack_offset: usize,
 }
@@ -44,7 +44,7 @@ impl VM {
             globals: HashMap::new(),
         };
         vm.frames.push(CallFrame {
-            function: script,
+            function: Rc::new(script),
             ip: 0,
             stack_offset: 0,
         });
@@ -249,7 +249,13 @@ impl VM {
                 OpCode::Loop => {
                     let offset = self.get_current_frame_mut().read_short();
                     self.get_current_frame_mut().ip -= offset as usize;
-                }
+                },
+                OpCode::Call => {
+                    let arg_count = self.get_current_frame_mut().read_byte();
+                    if !self.call_value(self.peek(arg_count as usize).clone(), arg_count) {
+                        return 1;
+                    }
+                },
                 OpCode::Return => {
                     return 0;
                 },
@@ -268,6 +274,34 @@ impl VM {
     fn peek(&self, distance: usize) -> &LoxValue {
         &self.stack[self.stack.len() - distance -1]
     }
+
+    fn call_value(&mut self, callee: LoxValue, arg_count: u8) -> bool {
+        match callee {
+            LoxValue::Function(func) => self.call(func, arg_count),
+            _ => {
+                self.runtime_error("Can only call functions and classes");
+                false
+            },
+        }
+    }
+
+    fn call(&mut self, function: Rc<LoxFunction>, arg_count: u8) -> bool {
+        if arg_count as usize != function.arity {
+            self.runtime_error(format!("Expected {} arguments but got {}", function.arity, arg_count).as_str());
+            return false;
+        }
+        if self.frames.len() == 255 {
+            self.runtime_error("Stack overflow");
+            return false;
+        }
+        self.frames.push(CallFrame {
+            function: Rc::clone(&function),
+            ip: 0,
+            stack_offset: self.stack.len() - arg_count as usize - 1,
+        });
+        true
+    }
+
 
     fn is_falsey(&self, value: &LoxValue) -> bool {
         match value {
@@ -289,8 +323,11 @@ impl VM {
 
     fn runtime_error(&self, msg: &str) {
         println!("{}", msg);
-        let line = self.get_current_frame().function.chunk.line_at(self.get_current_ip() - 1);
-        println!("[line {}] in script", line);
+
+        for frame in self.frames.iter().rev() {
+            let line = frame.function.chunk.line_at(frame.ip - 1);
+            println!("[line {}] in {}", line, frame.function.name.as_ref().unwrap_or(&"script".to_string()));
+        }
     }
 
     fn get_current_ip(&self) -> usize {
