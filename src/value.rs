@@ -1,4 +1,5 @@
 
+use std::fmt;
 use std::rc::Rc;
 
 use crate::chunk::Chunk;
@@ -10,6 +11,18 @@ pub enum LoxValue {
     String(Rc<String>),
     Function(Rc<LoxFunction>),
     Nil,
+}
+
+impl fmt::Display for LoxValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoxValue::Bool(b) => write!(f, "{}", b),
+            LoxValue::Double(d) => write!(f, "{}", d),
+            LoxValue::String(s) => write!(f, "\"{}\"", *s),
+            LoxValue::Function(fun) => write!(f, "fn<{}>", fun.name.as_ref().unwrap_or(&"script".to_string())),
+            LoxValue::Nil => write!(f, "nil"),
+        }
+    }
 }
 
 #[derive(Debug)]

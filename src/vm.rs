@@ -58,7 +58,11 @@ impl VM {
     pub fn run(&mut self) -> u8 {
         loop {
             if self.debug {
-                println!("{:?}", self.stack);
+                //println!("{:?}", self.stack);
+                println!("=== Stack === ");
+                for value in &self.stack {
+                    println!("{}", value);
+                }
                 self.get_current_frame().function.chunk.disassemble_instruction(self.get_current_ip());
             }
             let inst: OpCode = num::FromPrimitive::from_u8(self.get_current_frame_mut().read_byte()).unwrap();
@@ -72,12 +76,12 @@ impl VM {
                 OpCode::False => self.push(LoxValue::Bool(false)),
                 OpCode::Pop => { self.pop(); },
                 OpCode::GetLocal => {
-                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset;
+                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset + 1;
 
                     self.push(self.stack[slot].clone());
                 },
                 OpCode::SetLocal => {
-                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset;
+                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset + 1;
                     self.stack[slot] = self.peek(0).clone();
                 },
                 OpCode::GetGlobal => {
@@ -234,7 +238,7 @@ impl VM {
                     }
                 }
                 OpCode::Print => {
-                    println!("{:?}", self.pop());
+                    println!("{}", self.pop());
                 }
                 OpCode::Jump => {
                     let offset = self.get_current_frame_mut().read_short();
@@ -257,18 +261,33 @@ impl VM {
                     }
                 },
                 OpCode::Return => {
-                    return 0;
+                    let result = self.pop();
+                    let frame = self.frames.pop().unwrap();
+                    if self.frames.is_empty() {
+                        // We don't push an element for the script function, should we?
+                        //self.pop();
+                        return 0;
+                    }
+                    self.stack.truncate(frame.stack_offset);
+                    self.push(result);
                 },
             }
         }
     }
 
     fn push(&mut self, value: LoxValue) {
+        if self.debug {
+            println!("Pushing {}", value);
+        }
         self.stack.push(value)
     }
 
     fn pop(&mut self) -> LoxValue {
-        self.stack.pop().unwrap()
+        let value = self.stack.pop().unwrap();
+        if self.debug {
+            println!("Popping {}", value);
+        }
+        value
     }
 
     fn peek(&self, distance: usize) -> &LoxValue {

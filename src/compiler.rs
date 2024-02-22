@@ -14,6 +14,7 @@ struct Compiler<'a> {
     function_type: FunctionType,
 }
 
+#[derive(PartialEq)]
 enum FunctionType {
     Function,
     Script,
@@ -177,6 +178,7 @@ impl Compiler<'_> {
     }
 
     pub fn end_compiler(&mut self) {
+        self.emit_opcode(OpCode::Nil);
         self.emit_opcode(OpCode::Return);
         self.function.chunk.disassemble(self.function.name.as_deref().unwrap_or("code"));
     }
@@ -220,6 +222,21 @@ impl Compiler<'_> {
             self.statement();
         }
         self.patch_jump(else_jump);
+    }
+
+    pub fn return_statemnet(&mut self) {
+        if self.function_type == FunctionType::Script {
+            self.error("Can't return from top-level code.");
+        }
+
+        if self.matches(TokenType::Semicolon) {
+            self.emit_opcode(OpCode::Nil);
+            self.emit_opcode(OpCode::Return);
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_opcode(OpCode::Return);
+        }
     }
 
     pub fn declaration(&mut self) {
@@ -342,6 +359,8 @@ impl Compiler<'_> {
             self.print_statement();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::Return) {
+            self.return_statemnet();
         } else if self.matches(TokenType::For) {
             self.for_statement();
         } else if self.matches(TokenType::While) {
