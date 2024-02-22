@@ -404,7 +404,9 @@ impl Compiler<'_> {
         // End scope??
         // How should we be handling error propogation??
         let fn_obj = fn_compiler.function;
-        self.emit_constant(LoxValue::Function(Rc::new(fn_obj)));
+        self.emit_opcode(OpCode::Closure);
+        let constant_id = self.make_constant(LoxValue::Function(Rc::new(fn_obj)));
+        self.emit_byte(constant_id);
     }
 
     pub fn print_statement(&mut self) {

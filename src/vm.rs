@@ -43,11 +43,14 @@ impl VM {
             stack: Vec::new(),
             globals: HashMap::new(),
         };
-        vm.frames.push(CallFrame {
+        /*vm.frames.push(CallFrame {
             function: Rc::new(script),
             ip: 0,
             stack_offset: 0,
-        });
+        });*/
+        let rc = Rc::new(script);
+        vm.stack.push(LoxValue::Function(Rc::clone(&rc)));
+        vm.call(rc, 0);
         vm
     }
 
@@ -58,7 +61,6 @@ impl VM {
     pub fn run(&mut self) -> u8 {
         loop {
             if self.debug {
-                //println!("{:?}", self.stack);
                 println!("=== Stack === ");
                 for value in &self.stack {
                     println!("{}", value);
@@ -260,12 +262,23 @@ impl VM {
                         return 1;
                     }
                 },
+                OpCode::Closure => {
+                    let closure = match self.get_current_frame_mut().read_constant() {
+                        LoxValue::Function(func) => {
+                            Some(LoxValue::Closure(Rc::clone(func)))
+                        },
+                        rest => None,
+                    };
+                    match closure {
+                        Some(cl) => self.push(cl),
+                        None => self.runtime_error(&format!("Expected function constant"))
+                    }
+                },
                 OpCode::Return => {
                     let result = self.pop();
                     let frame = self.frames.pop().unwrap();
                     if self.frames.is_empty() {
-                        // We don't push an element for the script function, should we?
-                        //self.pop();
+                        self.pop();
                         return 0;
                     }
                     self.stack.truncate(frame.stack_offset);
@@ -296,7 +309,7 @@ impl VM {
 
     fn call_value(&mut self, callee: LoxValue, arg_count: u8) -> bool {
         match callee {
-            LoxValue::Function(func) => self.call(func, arg_count),
+            LoxValue::Closure(func) => self.call(func, arg_count),
             _ => {
                 self.runtime_error("Can only call functions and classes");
                 false
@@ -326,7 +339,7 @@ impl VM {
         match value {
             LoxValue::Nil => true,
             LoxValue::Bool(b) => !b,
-            LoxValue::Double(_) | LoxValue::String(_) | LoxValue::Function(_) => false,
+            LoxValue::Double(_) | LoxValue::String(_) | LoxValue::Function(_) | LoxValue::Closure(_) => false,
         }
     }
 

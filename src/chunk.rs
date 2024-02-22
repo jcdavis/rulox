@@ -32,6 +32,7 @@ pub enum OpCode {
     JumpIfFalse,
     Loop,
     Call,
+    Closure,
     Return,
 }
 
@@ -127,6 +128,12 @@ impl Chunk {
             OpCode::JumpIfFalse => self.jump_instruction(as_enum, offset, true),
             OpCode::Loop  => self.jump_instruction(as_enum, offset, false),
             OpCode::Call => self.byte_instruction(as_enum, offset),
+            OpCode::Closure => {
+                let constant = self.code[offset + 1];
+                let value = &self.constants[constant as usize];
+                println!("{:<16} {:04} '{:?}'", format!("{:?}", "Closure"), constant, value);
+                offset + 2
+            },
             OpCode::Return => Self::simple_instruction(as_enum, offset),
         }
     }

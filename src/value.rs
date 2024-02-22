@@ -10,6 +10,7 @@ pub enum LoxValue {
     Double(f64),
     String(Rc<String>),
     Function(Rc<LoxFunction>),
+    Closure(Rc<LoxFunction>),
     Nil,
 }
 
@@ -19,7 +20,7 @@ impl fmt::Display for LoxValue {
             LoxValue::Bool(b) => write!(f, "{}", b),
             LoxValue::Double(d) => write!(f, "{}", d),
             LoxValue::String(s) => write!(f, "\"{}\"", *s),
-            LoxValue::Function(fun) => write!(f, "fn<{}>", fun.name.as_ref().unwrap_or(&"script".to_string())),
+            LoxValue::Function(fun) | LoxValue::Closure(fun) => write!(f, "fn<{}>", fun.name.as_ref().unwrap_or(&"script".to_string())),
             LoxValue::Nil => write!(f, "nil"),
         }
     }
