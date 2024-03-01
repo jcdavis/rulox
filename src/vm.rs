@@ -1,12 +1,12 @@
 extern crate num;
 
-use std::{rc::Rc, collections::HashMap};
+use std::{collections::HashMap, rc::Rc};
 
-use crate::{chunk, value::{LoxValue, LoxFunction}};
-use chunk::{Chunk, OpCode};
+use crate::{chunk, value::{LoxClosure, LoxFunction, LoxValue}};
+use chunk::OpCode;
 
 struct CallFrame {
-    function: Rc<LoxFunction>,
+    closure: Rc<LoxClosure>,
     ip: usize,
     stack_offset: usize,
 }
@@ -14,11 +14,11 @@ struct CallFrame {
 impl CallFrame {
     fn read_constant(&mut self) -> &LoxValue {
         let new_offset = self.read_byte() as usize;
-        self.function.chunk.read_constant(new_offset)
+        self.closure.function.chunk.read_constant(new_offset)
     }
 
     fn read_byte(&mut self) -> u8 {
-        let byte = self.function.chunk.read_byte(self.ip);
+        let byte = self.closure.function.chunk.read_byte(self.ip);
         self.ip += 1;
         byte
     }
@@ -43,14 +43,11 @@ impl VM {
             stack: Vec::new(),
             globals: HashMap::new(),
         };
-        /*vm.frames.push(CallFrame {
-            function: Rc::new(script),
-            ip: 0,
-            stack_offset: 0,
-        });*/
-        let rc = Rc::new(script);
-        vm.stack.push(LoxValue::Function(Rc::clone(&rc)));
-        vm.call(rc, 0);
+        let closure = Rc::new(LoxClosure {
+            function: script,
+        });
+        vm.stack.push(LoxValue::Closure(closure.clone()));
+        vm.call(closure, 0);
         vm
     }
 
@@ -65,7 +62,7 @@ impl VM {
                 for value in &self.stack {
                     println!("{}", value);
                 }
-                self.get_current_frame().function.chunk.disassemble_instruction(self.get_current_ip());
+                self.get_current_frame().closure.function.chunk.disassemble_instruction(self.get_current_ip());
             }
             let inst: OpCode = num::FromPrimitive::from_u8(self.get_current_frame_mut().read_byte()).unwrap();
             match inst {
@@ -131,6 +128,12 @@ impl VM {
                             return 1;
                         }
                     }
+                },
+                OpCode::GetUpvalue => {
+
+                },
+                OpCode::SetUpvalue => {
+
                 },
                 OpCode::Equal => {
                     let b = self.pop();
@@ -264,14 +267,14 @@ impl VM {
                 },
                 OpCode::Closure => {
                     let closure = match self.get_current_frame_mut().read_constant() {
-                        LoxValue::Function(func) => {
-                            Some(LoxValue::Closure(Rc::clone(func)))
+                        LoxValue::Closure(func) => {
+                            Some(func.clone())
                         },
-                        rest => None,
+                        _ => None,
                     };
                     match closure {
-                        Some(cl) => self.push(cl),
-                        None => self.runtime_error(&format!("Expected function constant"))
+                        Some(cl) => self.push(LoxValue::Closure(cl)),
+                        None => self.runtime_error("Expected function constant")
                     }
                 },
                 OpCode::Return => {
@@ -317,9 +320,9 @@ impl VM {
         }
     }
 
-    fn call(&mut self, function: Rc<LoxFunction>, arg_count: u8) -> bool {
-        if arg_count as usize != function.arity {
-            self.runtime_error(format!("Expected {} arguments but got {}", function.arity, arg_count).as_str());
+    fn call(&mut self, closure: Rc<LoxClosure>, arg_count: u8) -> bool {
+        if arg_count as usize != closure.function.arity {
+            self.runtime_error(format!("Expected {} arguments but got {}", closure.function.arity, arg_count).as_str());
             return false;
         }
         if self.frames.len() == 255 {
@@ -327,7 +330,7 @@ impl VM {
             return false;
         }
         self.frames.push(CallFrame {
-            function: Rc::clone(&function),
+            closure: Rc::clone(&closure),
             ip: 0,
             stack_offset: self.stack.len() - arg_count as usize - 1,
         });
@@ -357,8 +360,8 @@ impl VM {
         println!("{}", msg);
 
         for frame in self.frames.iter().rev() {
-            let line = frame.function.chunk.line_at(frame.ip - 1);
-            println!("[line {}] in {}", line, frame.function.name.as_ref().unwrap_or(&"script".to_string()));
+            let line = frame.closure.function.chunk.line_at(frame.ip - 1);
+            println!("[line {}] in {}", line, frame.closure.function.name.as_ref().unwrap_or(&"script".to_string()));
         }
     }
 

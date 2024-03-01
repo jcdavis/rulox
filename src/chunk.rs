@@ -18,6 +18,8 @@ pub enum OpCode {
     GetGlobal,
     DefineGlobal,
     SetGlobal,
+    GetUpvalue,
+    SetUpvalue,
     Equal,
     Greater,
     Less,
@@ -114,6 +116,8 @@ impl Chunk {
             OpCode::GetGlobal => self.constant_instruction(as_enum, offset),
             OpCode::DefineGlobal => self.constant_instruction(as_enum, offset),
             OpCode::SetGlobal => self.constant_instruction(as_enum, offset),
+            OpCode::GetUpvalue => self.byte_instruction(as_enum, offset),
+            OpCode::SetUpvalue => self.byte_instruction(as_enum, offset),
             OpCode::Equal => Self::simple_instruction(as_enum, offset),
             OpCode::Greater => Self::simple_instruction(as_enum, offset),
             OpCode::Less => Self::simple_instruction(as_enum, offset),
@@ -130,9 +134,26 @@ impl Chunk {
             OpCode::Call => self.byte_instruction(as_enum, offset),
             OpCode::Closure => {
                 let constant = self.code[offset + 1];
+                let mut current = offset + 2;
                 let value = &self.constants[constant as usize];
-                println!("{:<16} {:04} '{:?}'", format!("{:?}", "Closure"), constant, value);
-                offset + 2
+                println!("{:<16} {:04} '{:?}'", format!("{:?}", as_enum), constant, value);
+                match value {
+                    LoxValue::Closure(func) => {
+                        for _ in 0..func.function.upvalue_count {
+                            let is_local = self.code[current];
+                            let idx = self.code[current + 1];
+                            let local_str = if is_local == 1 {
+                                "local"
+                            } else {
+                                "upvalue"
+                            };
+                            println!("{:04}      |                     {} {}", current, local_str, idx);
+                            current += 2;
+                        }
+                    },
+                    rest => println!("WARNING: Unexpected Value {}", rest),
+                }
+                current
             },
             OpCode::Return => Self::simple_instruction(as_enum, offset),
         }

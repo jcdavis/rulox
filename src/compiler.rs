@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{chunk::{Chunk, OpCode}, value::{LoxFunction, LoxValue}, scanner::{self, Scanner}};
+use crate::{chunk::{Chunk, OpCode}, scanner::{self, Scanner}, value::{LoxClosure, LoxFunction, LoxValue}};
 use scanner::{Token, TokenType};
 
-struct Compiler<'a> {
+struct Compiler<'a, 'b> {
     scanner: Rc<RefCell<Scanner<'a>>>,
     had_error: RefCell<bool>,
     panic_mode: RefCell<bool>,
@@ -12,6 +12,9 @@ struct Compiler<'a> {
     scope_depth: i32,
     function: LoxFunction,
     function_type: FunctionType,
+    parent: Option<&'b Compiler<'a, 'b>>,
+    upvalues: RefCell<Vec<UpValue>>,
+    function_upvalue_count: RefCell<usize>,
 }
 
 #[derive(PartialEq)]
@@ -23,6 +26,12 @@ enum FunctionType {
 struct Local {
     name: Token,
     depth: i32,
+}
+
+#[derive(PartialEq)]
+struct UpValue {
+    idx: u8,
+    is_local: bool,
 }
 
 type Precedence = u8;
@@ -57,8 +66,8 @@ pub fn compile(source: &str) -> Option<LoxFunction> {
     }
 }
 
-impl Compiler<'_> {
-    fn construct(scanner: Rc<RefCell<Scanner>>, function_type: FunctionType) -> Compiler {
+impl<'a, 'b> Compiler<'a, 'b> {
+    fn construct<'c>(scanner: Rc<RefCell<Scanner<'a>>>, function_type: FunctionType, parent: Option<&'c Compiler<'a, 'b>>) -> Compiler<'a, 'c> {
         let mut c = Compiler {
             scanner,
             had_error: RefCell::new(false),
@@ -68,9 +77,13 @@ impl Compiler<'_> {
             function: LoxFunction {
                 name: None,
                 arity: 0,
+                upvalue_count: 0,
                 chunk: Chunk::new(),
             },
             function_type,
+            parent,
+            upvalues: RefCell::new(Vec::new()),
+            function_upvalue_count: RefCell::new(0),
         };
        /*c.locals.push(Local {
             name: Token {
@@ -83,8 +96,8 @@ impl Compiler<'_> {
         c
     }
 
-    pub fn new(scanner: Scanner, function_type: FunctionType) -> Compiler {
-        Self::construct(Rc::new(RefCell::new(scanner)), function_type)
+    pub fn new(scanner: Scanner<'a>, function_type: FunctionType) -> Compiler<'a, 'b> {
+        Self::construct(Rc::new(RefCell::new(scanner)), function_type, None)
     }
 
     pub fn advance(&mut self) {
@@ -382,31 +395,47 @@ impl Compiler<'_> {
     }
 
     pub fn function(&mut self, function_type: FunctionType) {
-        let mut fn_compiler = Self::construct(Rc::clone(&self.scanner), function_type);
-        fn_compiler.function.name = Some(self.scanner.borrow().previous_token().unwrap().contents.clone());
-        fn_compiler.begin_scope();
-        fn_compiler.consume(TokenType::LeftParen, "Expect '(' after function name.");
-        if !fn_compiler.check(TokenType::RightParen) {
-            loop {
-                fn_compiler.function.arity += 1;
-                let constant = fn_compiler.parse_variable("Expect parameter name.");
-                fn_compiler.define_variable(constant);
-                if !self.matches(TokenType::Comma) {
-                    break;
+        let name = Some(self.scanner.borrow().previous_token().unwrap().contents.clone());
+        let (function, upvalues) = {
+            let rc = Rc::clone(&self.scanner);
+            let mut fn_compiler = Self::construct(rc, function_type, Some(self));
+            fn_compiler.function.name = name;
+            fn_compiler.begin_scope();
+            fn_compiler.consume(TokenType::LeftParen, "Expect '(' after function name.");
+            if !fn_compiler.check(TokenType::RightParen) {
+                loop {
+                    fn_compiler.function.arity += 1;
+                    let constant = fn_compiler.parse_variable("Expect parameter name.");
+                    fn_compiler.define_variable(constant);
+                    if !fn_compiler.matches(TokenType::Comma) {
+                        break;
+                    }
                 }
             }
-        }
-        fn_compiler.consume(TokenType::RightParen, "Expect ')' after parameters.");
-        fn_compiler.consume(TokenType::LeftBrace, "Expect '{' before function body.");
-        fn_compiler.block();
-        fn_compiler.end_compiler();
+            fn_compiler.consume(TokenType::RightParen, "Expect ')' after parameters.");
+            fn_compiler.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+            fn_compiler.block();
+            fn_compiler.end_compiler();
+            let mut function = fn_compiler.function;
+            function.upvalue_count = fn_compiler.function_upvalue_count.take();
+            (function, fn_compiler.upvalues.take())
+        };
 
         // End scope??
         // How should we be handling error propogation??
-        let fn_obj = fn_compiler.function;
+        let upvalue_count = function.upvalue_count;
         self.emit_opcode(OpCode::Closure);
-        let constant_id = self.make_constant(LoxValue::Function(Rc::new(fn_obj)));
+        let closure = LoxClosure {
+            function,
+        };
+        let constant_id = self.make_constant(LoxValue::Closure(Rc::new(closure)));
         self.emit_byte(constant_id);
+        //self.emit_constant(LoxValue::Closure(Rc::new(closure)));
+
+        for uv in upvalues.iter().take(upvalue_count) {
+            self.emit_byte(uv.is_local as u8);
+            self.emit_byte(uv.idx);
+        }
     }
 
     pub fn print_statement(&mut self) {
@@ -524,9 +553,12 @@ impl Compiler<'_> {
 
     pub fn named_variable(&mut self, name: String, can_assign: bool) {
 
-        let (arg, get_op, set_op) = match self.resolve_local(&name) {
-            Some(idx) => (idx, OpCode::GetLocal, OpCode::SetLocal),
-            None => (self.identifier_constant(name), OpCode::GetGlobal, OpCode::SetGlobal),
+        let (arg, get_op, set_op) = if let Some(idx) = self.resolve_local(&name) {
+            (idx, OpCode::GetLocal, OpCode::SetLocal)
+        } else if let Some(idx) = self.resolve_upvalue(&name) {
+            (idx, OpCode::GetUpvalue, OpCode::SetUpvalue)
+        } else {
+            (self.identifier_constant(name), OpCode::GetGlobal, OpCode::SetGlobal)
         };
 
         if can_assign && self.matches(TokenType::Equal) {
@@ -549,6 +581,35 @@ impl Compiler<'_> {
                 self.error("Can't read local variable in its own initializer.");
             }
             index as u8
+        })
+    }
+
+    pub fn resolve_upvalue(&self, name: &String) -> Option<u8> {
+        self.parent
+            .as_ref()
+            .and_then(|p| {
+                p.resolve_local(name).map(|idx| self.add_upvalue(idx, true))
+                .or_else(|| { p.resolve_upvalue(name).map(|idx| self.add_upvalue(idx, false))})
+            })
+    }
+
+    pub fn add_upvalue(&self, idx: u8, is_local: bool) -> u8 {
+        let upvalue = UpValue { idx, is_local};
+
+        let mut binding = self.upvalues.borrow_mut();
+        let existing_uv = binding
+            .iter()
+            .position(|x| x == &upvalue)
+            .map(|us| us as u8);
+        existing_uv.unwrap_or_else(|| {
+            if binding.len() == u8::MAX as usize {
+                self.error("Too many closure variables in function.");
+                0
+            } else {
+                *self.function_upvalue_count.borrow_mut() += 1;
+                binding.push(upvalue);
+                binding.len() as u8 - 1
+            }
         })
     }
 

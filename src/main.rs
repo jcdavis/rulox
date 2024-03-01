@@ -40,6 +40,4 @@ fn main() {
         Some(file_name) if args.len() == 2 => file( file_name),
         _ => panic!("Unexpected args"),
     }
-
-    // chunk.disassemble("test chunk");
 }
