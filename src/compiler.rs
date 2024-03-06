@@ -28,7 +28,7 @@ struct Local {
     depth: i32,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct UpValue {
     idx: u8,
     is_local: bool,
@@ -77,7 +77,6 @@ impl<'a, 'b> Compiler<'a, 'b> {
             function: LoxFunction {
                 name: None,
                 arity: 0,
-                upvalue_count: 0,
                 chunk: Chunk::new(),
             },
             function_type,
@@ -396,7 +395,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
     pub fn function(&mut self, function_type: FunctionType) {
         let name = Some(self.scanner.borrow().previous_token().unwrap().contents.clone());
-        let (function, upvalues) = {
+        let (function, upvalues, upvalue_count) = {
             let rc = Rc::clone(&self.scanner);
             let mut fn_compiler = Self::construct(rc, function_type, Some(self));
             fn_compiler.function.name = name;
@@ -416,17 +415,16 @@ impl<'a, 'b> Compiler<'a, 'b> {
             fn_compiler.consume(TokenType::LeftBrace, "Expect '{' before function body.");
             fn_compiler.block();
             fn_compiler.end_compiler();
-            let mut function = fn_compiler.function;
-            function.upvalue_count = fn_compiler.function_upvalue_count.take();
-            (function, fn_compiler.upvalues.take())
+            (fn_compiler.function, fn_compiler.upvalues.take(), fn_compiler.function_upvalue_count.take())
         };
 
         // End scope??
         // How should we be handling error propogation??
-        let upvalue_count = function.upvalue_count;
         self.emit_opcode(OpCode::Closure);
         let closure = LoxClosure {
             function,
+            upvalue_count,
+            upvalues: RefCell::new(Vec::new()),
         };
         let constant_id = self.make_constant(LoxValue::Closure(Rc::new(closure)));
         self.emit_byte(constant_id);
@@ -595,6 +593,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
     pub fn add_upvalue(&self, idx: u8, is_local: bool) -> u8 {
         let upvalue = UpValue { idx, is_local};
+        println!("ADDING UV: {:?}", &upvalue);
 
         let mut binding = self.upvalues.borrow_mut();
         let existing_uv = binding

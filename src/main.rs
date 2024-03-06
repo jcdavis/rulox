@@ -28,6 +28,7 @@ fn file(file_name: &str) {
 fn interpret(source: &str) {
     let script: LoxFunction = compile(source).expect("error parsing");
     let mut vm = VM::new(script);
+    //vm.debug();
     vm.run();
 }
 

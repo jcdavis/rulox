@@ -1,5 +1,6 @@
 
 use std::fmt;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::chunk::Chunk;
@@ -11,6 +12,7 @@ pub enum LoxValue {
     String(Rc<String>),
     Function(Rc<LoxFunction>),
     Closure(Rc<LoxClosure>),
+    UpValue(Rc<LoxValue>),
     Nil,
 }
 
@@ -22,6 +24,7 @@ impl fmt::Display for LoxValue {
             LoxValue::String(s) => write!(f, "\"{}\"", *s),
             LoxValue::Function(fun) => write!(f, "fn<{}>", fun.name.as_ref().unwrap_or(&"script".to_string())),
             LoxValue::Closure(cl) => write!(f, "fn<{}>", cl.function.name.as_ref().unwrap_or(&"script".to_string())),
+            LoxValue::UpValue(lv) => write!(f, "upvalue({})", lv.as_ref()),
             LoxValue::Nil => write!(f, "nil"),
         }
     }
@@ -31,13 +34,14 @@ impl fmt::Display for LoxValue {
 pub struct LoxFunction {
     pub name: Option<String>,
     pub arity: usize,
-    pub upvalue_count: usize,
     pub chunk: Chunk,
 }
 
 #[derive(Debug)]
 pub struct LoxClosure {
     pub function: LoxFunction,
+    pub upvalue_count: usize,
+    pub upvalues: RefCell<Vec<Rc<LoxValue>>>,
 }
 
 impl LoxValue {

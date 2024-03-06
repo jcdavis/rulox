@@ -139,7 +139,7 @@ impl Chunk {
                 println!("{:<16} {:04} '{:?}'", format!("{:?}", as_enum), constant, value);
                 match value {
                     LoxValue::Closure(func) => {
-                        for _ in 0..func.function.upvalue_count {
+                        for _ in 0..func.upvalue_count {
                             let is_local = self.code[current];
                             let idx = self.code[current + 1];
                             let local_str = if is_local == 1 {
