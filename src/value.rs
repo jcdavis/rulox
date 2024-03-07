@@ -1,10 +1,10 @@
 
 use std::fmt;
 use std::cell::RefCell;
+use std::process::id;
 use std::rc::Rc;
 
 use crate::chunk::Chunk;
-use crate::vm::UpValue;
 
 #[derive(Clone, Debug)]
 pub enum LoxValue {
@@ -35,16 +35,25 @@ pub struct LoxFunction {
 }
 
 #[derive(Debug)]
+pub enum UpValue {
+    Open(usize),
+    Closed(RefCell<LoxValue>),
+}
+
+impl Drop for UpValue {
+    fn drop(&mut self) {
+        match self {
+            UpValue::Open(idx) => println!("How is an open UV being dropped??? {}", idx),
+            UpValue::Closed(rc) => println!("dropping {:?}", rc),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct LoxClosure {
     pub function: LoxFunction,
     pub upvalue_count: usize,
     pub upvalues: RefCell<Vec<Rc<RefCell<UpValue>>>>,
-}
-
-impl Drop for LoxClosure {
-    fn drop(&mut self) {
-        println!("{:?} being dropped", self.function.name);
-    }
 }
 
 impl LoxValue {

@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Weak;
 use std::{collections::HashMap, rc::Rc};
 
-use crate::{chunk, value::{LoxClosure, LoxFunction, LoxValue}};
+use crate::{chunk, value::{LoxClosure, LoxFunction, LoxValue, UpValue}};
 use chunk::OpCode;
 
 struct CallFrame {
@@ -28,12 +28,6 @@ impl CallFrame {
     fn read_short(&mut self) -> u16 {
         ((self.read_byte() as u16) << 8) + (self.read_byte() as u16)
     }
-}
-
-#[derive(Debug)]
-pub enum UpValue {
-    Open(usize),
-    Closed(RefCell<LoxValue>),
 }
 
 pub struct VM {
