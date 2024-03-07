@@ -40,15 +40,6 @@ pub enum UpValue {
     Closed(RefCell<LoxValue>),
 }
 
-impl Drop for UpValue {
-    fn drop(&mut self) {
-        match self {
-            UpValue::Open(idx) => println!("How is an open UV being dropped??? {}", idx),
-            UpValue::Closed(rc) => println!("dropping {:?}", rc),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct LoxClosure {
     pub function: LoxFunction,
