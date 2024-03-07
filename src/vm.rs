@@ -38,8 +38,8 @@ pub enum UpValue {
 pub struct VM {
     debug: bool,
     frames: Vec<CallFrame>,
-    stack: Vec<Rc<LoxValue>>,
-    globals: HashMap<String, Rc<LoxValue>>,
+    stack: Vec<LoxValue>,
+    globals: HashMap<String, LoxValue>,
     upvalues: Vec<UpValue>,
 }
 
@@ -57,7 +57,7 @@ impl VM {
             upvalue_count: 0,
             upvalues: RefCell::new(Vec::new()),
         });
-        vm.stack.push(Rc::new(LoxValue::Closure(closure.clone())));
+        vm.stack.push(LoxValue::Closure(closure.clone()));
         vm.call(closure, 0);
         vm
     }
@@ -88,17 +88,17 @@ impl VM {
                 OpCode::GetLocal => {
                     let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset + 1;
 
-                    self.push_rc(Rc::clone(&self.stack[slot]));
+                    self.push(self.stack[slot].clone());
                 },
                 OpCode::SetLocal => {
                     let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset + 1;
-                    self.stack[slot] = Rc::clone(self.peek(0));
+                    self.stack[slot] = self.peek(0).clone();
                 },
                 OpCode::GetGlobal => {
                     match self.get_current_frame_mut().read_constant().as_string() {
                         Some(name) => {
                             match self.globals.get(&name) {
-                                Some(value) => self.push_rc(Rc::clone(value)),
+                                Some(value) => self.push(value.clone()),
                                 None => {
                                     self.runtime_error(&format!("Undefined variable {}", name));
                                     return 1;
@@ -128,7 +128,7 @@ impl VM {
                         Some(name) => {
                             let value = self.peek(0);
                             if self.globals.contains_key(&name) {
-                                self.globals.insert(name, Rc::clone(value));
+                                self.globals.insert(name, value.clone());
                             } else {
                                 self.runtime_error(format!("Undefined variable '{}'", name).as_str());
                                 return 1;
@@ -143,20 +143,19 @@ impl VM {
                 OpCode::GetUpvalue => {
                     let slot = self.get_current_frame_mut().read_byte() as usize;
                     let uv_idx = self.get_current_frame().closure.upvalues.borrow()[slot];
-                    let rc = match &self.upvalues[uv_idx] {
-                        UpValue::Open(idx) => Rc::clone(&self.stack[*idx]),
-                        UpValue::Closed(rc) => Rc::new(rc.borrow().clone()),
+                    let value = match &self.upvalues[uv_idx] {
+                        UpValue::Open(idx) => self.stack[*idx].clone(),
+                        UpValue::Closed(rc) => rc.borrow().clone(),
                     };
-                    self.push_rc(rc);
+                    self.push(value);
                 },
                 OpCode::SetUpvalue => {
                     let slot = self.get_current_frame_mut().read_byte() as usize;
                     let uv_idx = self.get_current_frame().closure.upvalues.borrow_mut()[slot];
                     let uv = &self.upvalues[uv_idx];
-                    let new_rc = Rc::clone(self.peek(0));
                     match uv {
-                        UpValue::Open(idx) => self.stack[*idx] =  new_rc,
-                        UpValue::Closed(rc) => *rc.borrow_mut() = (*new_rc).clone(),
+                        UpValue::Open(idx) => self.stack[*idx] = self.peek(0).clone(),
+                        UpValue::Closed(rc) => *rc.borrow_mut() = self.peek(0).clone(),
                     }
                 },
                 OpCode::Equal => {
@@ -191,7 +190,7 @@ impl VM {
                     }
                 }
                 OpCode::Add => {
-                    match (Rc::clone(self.peek(0)).as_ref(), Rc::clone(self.peek(1)).as_ref()) {
+                    match (self.peek(0).clone(), self.peek(1).clone()) {
                         (LoxValue::Double(a), LoxValue::Double(b)) => {
                             self.pop();
                             self.pop();
@@ -200,8 +199,8 @@ impl VM {
                         (LoxValue::String(a), LoxValue::String(b)) => {
                             self.pop();
                             self.pop();
-                            let mut string = (**b).clone();
-                            string.push_str(a);
+                            let mut string = (*b).clone();
+                            string.push_str(&a);
                             self.push(LoxValue::String(Rc::new(string)));
                         },
                         _ => {
@@ -285,8 +284,8 @@ impl VM {
                 },
                 OpCode::Call => {
                     let arg_count = self.get_current_frame_mut().read_byte();
-                    let call_value = Rc::clone(self.peek(arg_count as usize));
-                    if !self.call_value(&call_value, arg_count) {
+                    let call_value = self.peek(arg_count as usize).clone();
+                    if !self.call_value(call_value, arg_count) {
                         return 1;
                     }
                 },
@@ -326,24 +325,20 @@ impl VM {
                     }
                     self.close_upvalues(frame.stack_offset);
                     self.stack.truncate(frame.stack_offset);
-                    self.push_rc(result);
+                    self.push(result);
                 },
             }
         }
     }
 
     fn push(&mut self, value: LoxValue) {
-        self.push_rc(Rc::new(value))
-    }
-
-    fn push_rc(&mut self, value: Rc<LoxValue>) {
         if self.debug {
             println!("Pushing {}", value);
         }
         self.stack.push(value)
     }
 
-    fn pop(&mut self) -> Rc<LoxValue> {
+    fn pop(&mut self) -> LoxValue {
         let value = self.stack.pop().unwrap();
         if self.debug {
             println!("Popping {}", value);
@@ -351,7 +346,7 @@ impl VM {
         value
     }
 
-    fn peek(&self, distance: usize) -> &Rc<LoxValue> {
+    fn peek(&self, distance: usize) -> &LoxValue {
         &self.stack[self.stack.len() - distance -1]
     }
 
@@ -380,7 +375,8 @@ impl VM {
         for uv in self.upvalues.iter_mut() {
             match uv {
                 UpValue::Open(idx) if *idx >= stack_start_idx => {
-                    let stack_val = (*self.stack[*idx]).clone();
+                    // TODO(Can we just take the value and replace with Nil?)
+                    let stack_val = self.stack[*idx].clone();
                     *uv = UpValue::Closed(RefCell::new(stack_val));
                 },
                 _ => (),
@@ -388,9 +384,9 @@ impl VM {
         }
     }
 
-    fn call_value(&mut self, callee: &Rc<LoxValue>, arg_count: u8) -> bool {
-        match callee.as_ref() {
-            LoxValue::Closure(func) => self.call(Rc::clone(func), arg_count),
+    fn call_value(&mut self, callee: LoxValue, arg_count: u8) -> bool {
+        match callee {
+            LoxValue::Closure(func) => self.call(Rc::clone(&func), arg_count),
             _ => {
                 self.runtime_error("Can only call functions and classes");
                 false
