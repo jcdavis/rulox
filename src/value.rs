@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::chunk::Chunk;
+use crate::vm::UpValue;
 
 #[derive(Clone, Debug)]
 pub enum LoxValue {
@@ -37,8 +38,13 @@ pub struct LoxFunction {
 pub struct LoxClosure {
     pub function: LoxFunction,
     pub upvalue_count: usize,
-    // indices into the Runtime upvalue array
-    pub upvalues: RefCell<Vec<usize>>,
+    pub upvalues: RefCell<Vec<Rc<RefCell<UpValue>>>>,
+}
+
+impl Drop for LoxClosure {
+    fn drop(&mut self) {
+        println!("{:?} being dropped", self.function.name);
+    }
 }
 
 impl LoxValue {

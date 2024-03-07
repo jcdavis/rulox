@@ -1,6 +1,7 @@
 extern crate num;
 
 use std::cell::RefCell;
+use std::rc::Weak;
 use std::{collections::HashMap, rc::Rc};
 
 use crate::{chunk, value::{LoxClosure, LoxFunction, LoxValue}};
@@ -40,7 +41,10 @@ pub struct VM {
     frames: Vec<CallFrame>,
     stack: Vec<LoxValue>,
     globals: HashMap<String, LoxValue>,
-    upvalues: Vec<UpValue>,
+    // Closure's upvalues arrays keep references to the elements in this vec.
+    // We need to keep track of them to be able to dedup on creation (to avoid duplication when closing),
+    // But only keep weak so when the last closure referencing an upvalue is dropped, that value itself is also dropped.
+    upvalues: Vec<Weak<RefCell<UpValue>>>,
 }
 
 impl VM {
@@ -141,21 +145,35 @@ impl VM {
                     }
                 },
                 OpCode::GetUpvalue => {
-                    let slot = self.get_current_frame_mut().read_byte() as usize;
-                    let uv_idx = self.get_current_frame().closure.upvalues.borrow()[slot];
-                    let value = match &self.upvalues[uv_idx] {
-                        UpValue::Open(idx) => self.stack[*idx].clone(),
-                        UpValue::Closed(rc) => rc.borrow().clone(),
+                    let value = {
+                        let slot = self.get_current_frame_mut().read_byte() as usize;
+                        let uv = &self.get_current_frame().closure.upvalues.borrow()[slot];
+                        let binding = (**uv).borrow();
+                        match &*binding {
+                            UpValue::Open(idx) => self.stack[*idx].clone(),
+                            UpValue::Closed(rc) => rc.borrow().clone(),
+                        }
                     };
                     self.push(value);
                 },
                 OpCode::SetUpvalue => {
-                    let slot = self.get_current_frame_mut().read_byte() as usize;
-                    let uv_idx = self.get_current_frame().closure.upvalues.borrow_mut()[slot];
-                    let uv = &self.upvalues[uv_idx];
-                    match uv {
-                        UpValue::Open(idx) => self.stack[*idx] = self.peek(0).clone(),
-                        UpValue::Closed(rc) => *rc.borrow_mut() = self.peek(0).clone(),
+                    // Hacky workaround beacuse I am bad at rust:
+                    // We can't mutate the stack directly in the open case since we still have an immutable binding ref.
+                    // So instead, return the idx to mutate and do that below with the refs all dropped.
+                    let idx_opt = {
+                        let slot = self.get_current_frame_mut().read_byte() as usize;
+                        let uv = &self.get_current_frame().closure.upvalues.borrow()[slot];
+                        let binding = (**uv).borrow();
+                        match &*binding {
+                            UpValue::Open(idx) => Some(*idx),
+                            UpValue::Closed(rc) => {
+                                *rc.borrow_mut() = self.peek(0).clone();
+                                None
+                            },
+                        }
+                    };
+                    if let Some(idx) = idx_opt {
+                        self.stack[idx] = self.peek(0).clone();
                     }
                 },
                 OpCode::Equal => {
@@ -305,7 +323,7 @@ impl VM {
                                 cl.upvalues.borrow_mut().push(if is_local {
                                     self.capture_upvalue(self.get_current_frame().stack_offset + idx + 1)
                                 } else {
-                                    self.get_current_frame().closure.upvalues.borrow()[i]
+                                    Rc::clone(&self.get_current_frame().closure.upvalues.borrow()[i])
                                 });
                             }
                         },
@@ -350,36 +368,41 @@ impl VM {
         &self.stack[self.stack.len() - distance -1]
     }
 
-    // Returns index in the VM's UV array. idx is absolute stack slot
-    fn capture_upvalue(&mut self, idx: usize) -> usize {
+    // idx is absolute stack slot
+    fn capture_upvalue(&mut self, idx: usize) -> Rc<RefCell<UpValue>> {
         if self.debug {
             println!("Capturing the following UV: {}: {} ", idx, &self.stack[idx]);
         }
         // TODO: sort by idx to speed up search
         let existing_opt = self.upvalues.iter()
-            .enumerate()
-            .find(|(_idx, uv)| match uv {
-                UpValue::Open(existing_idx) => *existing_idx == idx,
-                _ => false,
-            }
-            )
-            .map(|(existing_idx, _)| existing_idx);
+            .find_map(|weak| {
+                weak.upgrade().and_then(|rc| {
+                    match *(*rc).borrow() {
+                        UpValue::Open(existing_idx) if existing_idx == idx => Some(Rc::clone(&rc)),
+                        _ => None,
+                    }
+                })
+            });
 
         existing_opt.unwrap_or_else(|| {
-            self.upvalues.push(UpValue::Open(idx));
-            self.upvalues.len() - 1
+            let rc = Rc::new(RefCell::new(UpValue::Open(idx)));
+            self.upvalues.push(Rc::downgrade(&rc));
+            rc
         })
     }
 
     fn close_upvalues(&mut self, stack_start_idx: usize) {
         for uv in self.upvalues.iter_mut() {
-            match uv {
-                UpValue::Open(idx) if *idx >= stack_start_idx => {
-                    // TODO(Can we just take the value and replace with Nil?)
-                    let stack_val = self.stack[*idx].clone();
-                    *uv = UpValue::Closed(RefCell::new(stack_val));
-                },
-                _ => (),
+            if let Some(rc) = uv.upgrade() {
+                let mut binding = (*rc).borrow_mut();
+                match *binding {
+                    UpValue::Open(idx)if idx >= stack_start_idx => {
+                        // TODO(Can we just take the value and replace with Nil?)
+                        let stack_val = self.stack[idx].clone();
+                        *binding = UpValue::Closed(RefCell::new(stack_val));
+                    },
+                    _ => (),
+                }
             }
         }
     }
