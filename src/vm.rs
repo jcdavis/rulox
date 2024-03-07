@@ -29,11 +29,18 @@ impl CallFrame {
     }
 }
 
+#[derive(Debug)]
+pub enum UpValue {
+    Open(usize),
+    Closed(RefCell<LoxValue>),
+}
+
 pub struct VM {
     debug: bool,
     frames: Vec<CallFrame>,
     stack: Vec<Rc<LoxValue>>,
     globals: HashMap<String, Rc<LoxValue>>,
+    upvalues: Vec<UpValue>,
 }
 
 impl VM {
@@ -43,6 +50,7 @@ impl VM {
             frames: Vec::new(),
             stack: Vec::new(),
             globals: HashMap::new(),
+            upvalues: Vec::new()
         };
         let closure = Rc::new(LoxClosure {
             function: script,
@@ -134,15 +142,22 @@ impl VM {
                 },
                 OpCode::GetUpvalue => {
                     let slot = self.get_current_frame_mut().read_byte() as usize;
-                    let rc =  Rc::clone(&self.get_current_frame().closure.upvalues.borrow()[slot]);
-                    println!("GETTING UPVALUE {}", rc);
+                    let uv_idx = self.get_current_frame().closure.upvalues.borrow()[slot];
+                    let rc = match &self.upvalues[uv_idx] {
+                        UpValue::Open(idx) => Rc::clone(&self.stack[*idx]),
+                        UpValue::Closed(rc) => Rc::new(rc.borrow().clone()),
+                    };
                     self.push_rc(rc);
                 },
                 OpCode::SetUpvalue => {
                     let slot = self.get_current_frame_mut().read_byte() as usize;
+                    let uv_idx = self.get_current_frame().closure.upvalues.borrow_mut()[slot];
+                    let uv = &self.upvalues[uv_idx];
                     let new_rc = Rc::clone(self.peek(0));
-                    println!("SETTING UPVALUE at {} TO BE {}", slot, new_rc);
-                    self.get_current_frame().closure.upvalues.borrow_mut()[slot]  = new_rc;
+                    match uv {
+                        UpValue::Open(idx) => self.stack[*idx] =  new_rc,
+                        UpValue::Closed(rc) => *rc.borrow_mut() = (*new_rc).clone(),
+                    }
                 },
                 OpCode::Equal => {
                     let b = self.pop();
@@ -285,19 +300,22 @@ impl VM {
                     match closure {
                         Some(cl) => {
                             self.push(LoxValue::Closure(Rc::clone(&cl)));
-                            println!("CLOSURE TIME - expect {} UV. Existing array {:?}", cl.as_ref().upvalue_count, cl.upvalues.borrow());
                             for i in 0..cl.as_ref().upvalue_count {
                                 let is_local = self.get_current_frame_mut().read_byte() != 0;
                                 let idx = self.get_current_frame_mut().read_byte() as usize;
                                 cl.upvalues.borrow_mut().push(if is_local {
                                     self.capture_upvalue(self.get_current_frame().stack_offset + idx + 1)
                                 } else {
-                                    Rc::clone(&self.get_current_frame().closure.upvalues.borrow()[i])
+                                    self.get_current_frame().closure.upvalues.borrow()[i]
                                 });
                             }
                         },
                         None => self.runtime_error("Expected function constant")
                     }
+                },
+                OpCode::CloseUpValue => {
+                    self.close_upvalues(self.stack.len() - 1);
+                    self.pop();
                 },
                 OpCode::Return => {
                     let result = self.pop();
@@ -306,6 +324,7 @@ impl VM {
                         self.pop();
                         return 0;
                     }
+                    self.close_upvalues(frame.stack_offset);
                     self.stack.truncate(frame.stack_offset);
                     self.push_rc(result);
                 },
@@ -336,13 +355,37 @@ impl VM {
         &self.stack[self.stack.len() - distance -1]
     }
 
-    fn capture_upvalue(&mut self, idx: usize) -> Rc<LoxValue> {
-        println!("CAPTURING THE FOLLOWING UPVALUE at {}: {} ", idx, &self.stack[idx]);
-        println!("=== Stack === ");
-        for value in &self.stack {
-            println!("{}", value);
+    // Returns index in the VM's UV array. idx is absolute stack slot
+    fn capture_upvalue(&mut self, idx: usize) -> usize {
+        if self.debug {
+            println!("Capturing the following UV: {}: {} ", idx, &self.stack[idx]);
         }
-        Rc::clone(&self.stack[idx])
+        // TODO: sort by idx to speed up search
+        let existing_opt = self.upvalues.iter()
+            .enumerate()
+            .find(|(_idx, uv)| match uv {
+                UpValue::Open(existing_idx) => *existing_idx == idx,
+                _ => false,
+            }
+            )
+            .map(|(existing_idx, _)| existing_idx);
+
+        existing_opt.unwrap_or_else(|| {
+            self.upvalues.push(UpValue::Open(idx));
+            self.upvalues.len() - 1
+        })
+    }
+
+    fn close_upvalues(&mut self, stack_start_idx: usize) {
+        for uv in self.upvalues.iter_mut() {
+            match uv {
+                UpValue::Open(idx) if *idx >= stack_start_idx => {
+                    let stack_val = (*self.stack[*idx]).clone();
+                    *uv = UpValue::Closed(RefCell::new(stack_val));
+                },
+                _ => (),
+            }
+        }
     }
 
     fn call_value(&mut self, callee: &Rc<LoxValue>, arg_count: u8) -> bool {
@@ -377,8 +420,7 @@ impl VM {
         match value {
             LoxValue::Nil => true,
             LoxValue::Bool(b) => !b,
-            LoxValue::Double(_) | LoxValue::String(_) | LoxValue::Function(_) | LoxValue::Closure(_) => false,
-            LoxValue::UpValue(lv) => Self::is_falsey(lv.as_ref())
+            LoxValue::Double(_) | LoxValue::String(_) | LoxValue::Closure(_) => false,
         }
     }
 

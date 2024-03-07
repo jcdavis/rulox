@@ -10,9 +10,7 @@ pub enum LoxValue {
     Bool(bool),
     Double(f64),
     String(Rc<String>),
-    Function(Rc<LoxFunction>),
     Closure(Rc<LoxClosure>),
-    UpValue(Rc<LoxValue>),
     Nil,
 }
 
@@ -22,9 +20,7 @@ impl fmt::Display for LoxValue {
             LoxValue::Bool(b) => write!(f, "{}", b),
             LoxValue::Double(d) => write!(f, "{}", d),
             LoxValue::String(s) => write!(f, "\"{}\"", *s),
-            LoxValue::Function(fun) => write!(f, "fn<{}>", fun.name.as_ref().unwrap_or(&"script".to_string())),
             LoxValue::Closure(cl) => write!(f, "fn<{}>", cl.function.name.as_ref().unwrap_or(&"script".to_string())),
-            LoxValue::UpValue(lv) => write!(f, "upvalue({})", lv.as_ref()),
             LoxValue::Nil => write!(f, "nil"),
         }
     }
@@ -41,20 +37,14 @@ pub struct LoxFunction {
 pub struct LoxClosure {
     pub function: LoxFunction,
     pub upvalue_count: usize,
-    pub upvalues: RefCell<Vec<Rc<LoxValue>>>,
+    // indices into the Runtime upvalue array
+    pub upvalues: RefCell<Vec<usize>>,
 }
 
 impl LoxValue {
     pub fn as_double(&self) -> Option<f64> {
         match self {
             LoxValue::Double(d) => Some(*d),
-            _ => None
-        }
-    }
-
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            LoxValue::Bool(b) => Some(*b),
             _ => None
         }
     }

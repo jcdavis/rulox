@@ -26,6 +26,7 @@ enum FunctionType {
 struct Local {
     name: Token,
     depth: i32,
+    is_captured: RefCell<bool>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -116,9 +117,6 @@ impl<'a, 'b> Compiler<'a, 'b> {
         if self.scanner.borrow().current_token().is_some_and(|c| c.token_type == expected) {
             self.advance();
         } else {
-            //let binding = self.scanner.borrow();
-            //let current = binding.current_token().unwrap();
-            // panic!("{} at {}, which is {:?}",error_message, current.line, current);
             self.error_at_current(error_message);
         }
     }
@@ -203,8 +201,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.scope_depth -= 1;
 
         while !self.locals.is_empty() && self.locals.last().unwrap().depth > self.scope_depth {
-            self.emit_opcode(OpCode::Pop);
-            self.locals.pop();
+            let local = self.locals.pop().unwrap();
+            if *local.is_captured.borrow() {
+                self.emit_opcode(OpCode::CloseUpValue);
+            } else {
+                self.emit_opcode(OpCode::Pop);
+            }
         }
     }
 
@@ -345,6 +347,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.locals.push(Local {
             name,
             depth: -1,
+            is_captured: RefCell::new(false),
         });
     }
 
@@ -586,14 +589,16 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.parent
             .as_ref()
             .and_then(|p| {
-                p.resolve_local(name).map(|idx| self.add_upvalue(idx, true))
+                p.resolve_local(name).map(|idx| {
+                    *p.locals[idx as usize].is_captured.borrow_mut() = true;
+                    self.add_upvalue(idx, true)
+                })
                 .or_else(|| { p.resolve_upvalue(name).map(|idx| self.add_upvalue(idx, false))})
             })
     }
 
     pub fn add_upvalue(&self, idx: u8, is_local: bool) -> u8 {
         let upvalue = UpValue { idx, is_local};
-        println!("ADDING UV: {:?}", &upvalue);
 
         let mut binding = self.upvalues.borrow_mut();
         let existing_uv = binding

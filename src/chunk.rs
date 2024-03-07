@@ -35,6 +35,7 @@ pub enum OpCode {
     Loop,
     Call,
     Closure,
+    CloseUpValue,
     Return,
 }
 
@@ -155,6 +156,7 @@ impl Chunk {
                 }
                 current
             },
+            OpCode::CloseUpValue => Self::simple_instruction(as_enum, offset),
             OpCode::Return => Self::simple_instruction(as_enum, offset),
         }
     }
