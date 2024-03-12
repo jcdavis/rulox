@@ -6,7 +6,7 @@ use num_derive::ToPrimitive;
 
 use crate::value::LoxValue;
 
-#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[derive(Debug, FromPrimitive, PartialEq, ToPrimitive)]
 pub enum OpCode {
     Constant,
     Nil,
@@ -20,6 +20,8 @@ pub enum OpCode {
     SetGlobal,
     GetUpvalue,
     SetUpvalue,
+    GetProperty,
+    SetProperty,
     Equal,
     Greater,
     Less,
@@ -37,6 +39,7 @@ pub enum OpCode {
     Closure,
     CloseUpValue,
     Return,
+    Class,
 }
 
 #[derive(Debug)]
@@ -119,6 +122,8 @@ impl Chunk {
             OpCode::SetGlobal => self.constant_instruction(as_enum, offset),
             OpCode::GetUpvalue => self.byte_instruction(as_enum, offset),
             OpCode::SetUpvalue => self.byte_instruction(as_enum, offset),
+            OpCode::GetProperty => self.constant_instruction(as_enum, offset),
+            OpCode::SetProperty => self.constant_instruction(as_enum, offset),
             OpCode::Equal => Self::simple_instruction(as_enum, offset),
             OpCode::Greater => Self::simple_instruction(as_enum, offset),
             OpCode::Less => Self::simple_instruction(as_enum, offset),
@@ -158,6 +163,7 @@ impl Chunk {
             },
             OpCode::CloseUpValue => Self::simple_instruction(as_enum, offset),
             OpCode::Return => Self::simple_instruction(as_enum, offset),
+            OpCode::Class => self.constant_instruction(as_enum, offset),
         }
     }
 

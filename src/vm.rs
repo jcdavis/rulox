@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Weak;
 use std::{collections::HashMap, rc::Rc};
 
+use crate::value::{LoxClass, LoxInstance};
 use crate::{chunk, value::{LoxClosure, LoxFunction, LoxValue, UpValue}};
 use chunk::OpCode;
 
@@ -170,6 +171,48 @@ impl VM {
                         self.stack[idx] = self.peek(0).clone();
                     }
                 },
+                OpCode::GetProperty => {
+                    let inst_value = self.pop();
+                    if let LoxValue::Instance(inst) = inst_value {
+                        let name = self.get_current_frame_mut().read_constant();
+                        let existing_opt = if let LoxValue::String(string) = name {
+                            inst.fields.borrow().get(string).cloned()
+                        } else {
+                            self.runtime_error("Expecting property name to be a string");
+                            return 1
+                        };
+                        match existing_opt {
+                            Some(val) => {
+                                self.push(val);
+                            },
+                            None => {
+                                let error_message = format!("Undefined property {}", name);
+                                self.runtime_error(error_message.as_str());
+                                return 1;
+                            }
+                        }
+                    } else {
+                        self.runtime_error("Can only get propertty on instances");
+                        return 1;
+                    }
+                },
+                OpCode::SetProperty => {
+                    let assigned_value = self.pop();
+                    let inst_value = self.pop();
+                    if let LoxValue::Instance(inst) = inst_value {
+                        let name = self.get_current_frame_mut().read_constant();
+                        if let LoxValue::String(string) = name {
+                            inst.fields.borrow_mut().insert(Rc::clone(string), assigned_value.clone());
+                            self.push(assigned_value);
+                        } else {
+                            self.runtime_error("Expecting property name to be a string");
+                            return 1
+                        }
+                    } else {
+                        self.runtime_error("Can only set property on instances");
+                        return 1;
+                    }
+                },
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
@@ -321,7 +364,10 @@ impl VM {
                                 });
                             }
                         },
-                        None => self.runtime_error("Expected function constant")
+                        None => {
+                            self.runtime_error("Expected function constant");
+                            return 1
+                        },
                     }
                 },
                 OpCode::CloseUpValue => {
@@ -338,6 +384,20 @@ impl VM {
                     self.close_upvalues(frame.stack_offset);
                     self.stack.truncate(frame.stack_offset);
                     self.push(result);
+                },
+                OpCode::Class => {
+                    match self.get_current_frame_mut().read_constant() {
+                        LoxValue::String(rc) => {
+                            let klass = LoxClass {
+                                name: Rc::clone(rc),
+                            };
+                            self.push(LoxValue::Class(Rc::new(klass)));
+                        }
+                        _ => {
+                            self.runtime_error("Expected string for class name");
+                            return 1;
+                        }
+                    }
                 },
             }
         }
@@ -404,7 +464,17 @@ impl VM {
     fn call_value(&mut self, callee: LoxValue, arg_count: u8) -> bool {
         match callee {
             LoxValue::Closure(func) => self.call(Rc::clone(&func), arg_count),
-            _ => {
+            LoxValue::Class(cl) => {
+                let inst = LoxInstance {
+                    klass: Rc::clone(&cl),
+                    fields: RefCell::new(HashMap::new()),
+                };
+                let idx = self.stack.len() - arg_count as usize - 1;
+                self.stack[idx] = LoxValue::Instance(Rc::new(inst));
+                true
+            },
+            rest => {
+                println!("{}", rest);
                 self.runtime_error("Can only call functions and classes");
                 false
             },
@@ -433,7 +503,7 @@ impl VM {
         match value {
             LoxValue::Nil => true,
             LoxValue::Bool(b) => !b,
-            LoxValue::Double(_) | LoxValue::String(_) | LoxValue::Closure(_) => false,
+            _ => false,
         }
     }
 

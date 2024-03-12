@@ -254,7 +254,9 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     pub fn declaration(&mut self) {
-        if self.matches(TokenType::Fun) {
+        if self.matches(TokenType::Class) {
+            self.class_declaration();
+        } else if self.matches(TokenType::Fun) {
             self.fun_declaration();
         } else if self.matches(TokenType::Var) {
             self.var_declaration();
@@ -265,6 +267,20 @@ impl<'a, 'b> Compiler<'a, 'b> {
         if *self.panic_mode.borrow() {
             self.synchronize();
         }
+    }
+
+    pub fn class_declaration(&mut self) {
+        self.consume(TokenType::Identifier, "Expect class name.");
+        let class_name = self.scanner.borrow().previous_token().unwrap().contents.clone();
+        let name_constant = self.identifier_constant(class_name);
+        self.declare_variable();
+
+        self.emit_opcode(OpCode::Class);
+        self.emit_byte(name_constant);
+        self.define_variable(name_constant);
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.");
     }
 
     pub fn fun_declaration(&mut self) {
@@ -656,6 +672,20 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
     }
 
+    pub fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expect property name after '.'.");
+        let name = self.scanner.borrow().previous_token().unwrap().contents.clone();
+        let name_id = self.identifier_constant(name);
+
+        if can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_opcode(OpCode::SetProperty);
+        } else {
+            self.emit_opcode(OpCode::GetProperty);
+        }
+        self.emit_byte(name_id);
+    }
+
     pub fn call(&mut self) {
         let arg_count = self.argument_list();
         self.emit_opcode(OpCode::Call);
@@ -699,7 +729,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         while precedence <= self.get_precedence(self.scanner.borrow().current_token().unwrap().token_type) {
             self.advance();
             let token_type = self.scanner.borrow().previous_token().unwrap().token_type;
-            self.do_infix(token_type);
+            self.do_infix(token_type, can_assign);
 
             if can_assign && self.matches(TokenType::Equal) {
                 self.error("Invalid assignment target");
@@ -719,7 +749,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
      }
 
-     pub fn do_infix(&mut self, token_type: TokenType) {
+     pub fn do_infix(&mut self, token_type: TokenType, can_assign: bool) {
         match token_type {
             TokenType::LeftParen => self.call(),
             TokenType::Minus | TokenType::Plus | TokenType::Slash | TokenType::Star => self.binary(),
@@ -727,13 +757,14 @@ impl<'a, 'b> Compiler<'a, 'b> {
                 TokenType::Less | TokenType::LessEqual => self.binary(),
             TokenType::And => self.and_(),
             TokenType::Or => self.or_(),
+            TokenType::Dot => self.dot(can_assign),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
         }
      }
 
      pub fn get_precedence(&self, token_type: TokenType) -> Precedence {
         match token_type {
-            TokenType::LeftParen => PRECEDENCE_CALL,
+            TokenType::LeftParen | TokenType::Dot => PRECEDENCE_CALL,
             TokenType::Minus | TokenType::Plus => PRECEDENCE_TERM,
             TokenType::Slash | TokenType::Star => PRECEDENCE_FACTOR,
             TokenType::BangEqual | TokenType::EqualEqual => PRECEDENCE_EQUALITY,
