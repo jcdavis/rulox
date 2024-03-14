@@ -272,15 +272,20 @@ impl<'a, 'b> Compiler<'a, 'b> {
     pub fn class_declaration(&mut self) {
         self.consume(TokenType::Identifier, "Expect class name.");
         let class_name = self.scanner.borrow().previous_token().unwrap().contents.clone();
-        let name_constant = self.identifier_constant(class_name);
+        let name_constant = self.identifier_constant(class_name.clone());
         self.declare_variable();
 
         self.emit_opcode(OpCode::Class);
         self.emit_byte(name_constant);
         self.define_variable(name_constant);
 
+        self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.method();
+        }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+        self.emit_opcode(OpCode::Pop); // Class named variable
     }
 
     pub fn fun_declaration(&mut self) {
@@ -453,6 +458,16 @@ impl<'a, 'b> Compiler<'a, 'b> {
             self.emit_byte(uv.is_local as u8);
             self.emit_byte(uv.idx);
         }
+    }
+
+    pub fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expect method name.");
+        let name = self.scanner.borrow().previous_token().unwrap().contents.clone();
+        let constant = self.identifier_constant(name);
+
+        self.function(FunctionType::Function);
+        self.emit_opcode(OpCode::Method);
+        self.emit_byte(constant);
     }
 
     pub fn print_statement(&mut self) {

@@ -40,6 +40,7 @@ pub enum OpCode {
     CloseUpValue,
     Return,
     Class,
+    Method,
 }
 
 #[derive(Debug)]
@@ -164,6 +165,7 @@ impl Chunk {
             OpCode::CloseUpValue => Self::simple_instruction(as_enum, offset),
             OpCode::Return => Self::simple_instruction(as_enum, offset),
             OpCode::Class => self.constant_instruction(as_enum, offset),
+            OpCode::Method => self.constant_instruction(as_enum, offset),
         }
     }
 

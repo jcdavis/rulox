@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Weak;
 use std::{collections::HashMap, rc::Rc};
 
-use crate::value::{LoxClass, LoxInstance};
+use crate::value::{LoxBoundMethod, LoxClass, LoxInstance};
 use crate::{chunk, value::{LoxClosure, LoxFunction, LoxValue, UpValue}};
 use chunk::OpCode;
 
@@ -174,23 +174,24 @@ impl VM {
                 OpCode::GetProperty => {
                     let inst_value = self.pop();
                     if let LoxValue::Instance(inst) = inst_value {
-                        let name = self.get_current_frame_mut().read_constant();
-                        let existing_opt = if let LoxValue::String(string) = name {
-                            inst.fields.borrow().get(string).cloned()
-                        } else {
-                            self.runtime_error("Expecting property name to be a string");
-                            return 1
-                        };
-                        match existing_opt {
-                            Some(val) => {
-                                self.push(val);
-                            },
-                            None => {
-                                let error_message = format!("Undefined property {}", name);
-                                self.runtime_error(error_message.as_str());
+                        let name = match self.get_current_frame_mut().read_constant() {
+                            LoxValue::String(str) => Rc::clone(str),
+                            _ => {
+                                self.runtime_error("Expecting property name to be a string");
                                 return 1;
-                            }
-                        }
+                            },
+                        };
+
+                        let inst_clone = Rc::clone(&inst);
+                        match inst_clone.fields.borrow().get(&name) {
+                            Some(value) => self.push(value.clone()),
+                            None => {
+                                // Property not defined, try method bind
+                                if !self.bind_method(inst, name) {
+                                    return 1;
+                                }
+                            },
+                        };
                     } else {
                         self.runtime_error("Can only get propertty on instances");
                         return 1;
@@ -390,6 +391,7 @@ impl VM {
                         LoxValue::String(rc) => {
                             let klass = LoxClass {
                                 name: Rc::clone(rc),
+                                methods: RefCell::new(HashMap::new()),
                             };
                             self.push(LoxValue::Class(Rc::new(klass)));
                         }
@@ -399,6 +401,30 @@ impl VM {
                         }
                     }
                 },
+                OpCode::Method => {
+                    let name = self.get_current_frame_mut().read_constant().clone();
+
+                    if let LoxValue::String(str) = name {
+                        let method = self.peek(0);
+                        let klass = self.peek(1);
+
+                        if let LoxValue::Closure(cloj) = method {
+                            if let LoxValue::Class(kl) = klass {
+                                kl.methods.borrow_mut().insert(Rc::clone(&str), Rc::clone(cloj));
+                                self.pop();
+                            } else {
+                                self.runtime_error("Expected class, got");
+                                return 1;
+                            }
+                        } else {
+                            self.runtime_error("Expected closure for method");
+                            return 1;
+                        }
+                    } else {
+                        self.runtime_error("Expected string for method name");
+                        return 1;
+                    }
+                }
             }
         }
     }
@@ -473,11 +499,36 @@ impl VM {
                 self.stack[idx] = LoxValue::Instance(Rc::new(inst));
                 true
             },
+            LoxValue::BoundMethod(bm) => {
+                self.call(Rc::clone(&bm.method), arg_count);
+                true
+            },
             rest => {
                 println!("{}", rest);
                 self.runtime_error("Can only call functions and classes");
                 false
             },
+        }
+    }
+
+    fn bind_method(&mut self, inst: Rc<LoxInstance>, name: Rc<String>) -> bool {
+        let second_inst = Rc::clone(&inst);
+        let binding = second_inst.klass.methods.borrow();
+        let method = binding.get(&name);
+        match method {
+            Some(method) => {
+                let bound = LoxBoundMethod {
+                    receiver: inst,
+                    method: Rc::clone(method),
+                };
+                self.push(LoxValue::BoundMethod(Rc::new(bound)));
+                true
+            },
+            None => {
+                let msg = format!("Undefined property '{}'.", name);
+                self.runtime_error(&msg);
+                false
+            }
         }
     }
 

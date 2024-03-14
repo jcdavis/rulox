@@ -14,6 +14,7 @@ pub enum LoxValue {
     Closure(Rc<LoxClosure>),
     Class(Rc<LoxClass>),
     Instance(Rc<LoxInstance>),
+    BoundMethod(Rc<LoxBoundMethod>),
     Nil,
 }
 
@@ -26,6 +27,7 @@ impl fmt::Display for LoxValue {
             LoxValue::Closure(cl) => write!(f, "fn<{}>", cl.function.name.as_ref().unwrap_or(&"script".to_string())),
             LoxValue::Class(cl) => write!(f, "{} klass ", cl.name),
             LoxValue::Instance(inst) => write!(f, "{} instance", inst.klass.name),
+            LoxValue::BoundMethod(bm) => write!(f, "fn<{}>", bm.method.function.name.as_ref().unwrap_or(&"script".to_string())),
             LoxValue::Nil => write!(f, "nil"),
         }
     }
@@ -54,6 +56,13 @@ pub struct LoxClosure {
 #[derive(Debug)]
 pub struct LoxClass {
     pub name: Rc<String>,
+    pub methods: RefCell<HashMap<Rc<String>, Rc<LoxClosure>>>,
+}
+
+#[derive(Debug)]
+pub struct LoxBoundMethod {
+    pub receiver: Rc<LoxInstance>,
+    pub method: Rc<LoxClosure>,
 }
 
 #[derive(Debug)]
