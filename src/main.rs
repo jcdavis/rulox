@@ -4,6 +4,7 @@ mod chunk;
 mod compiler;
 mod value;
 mod scanner;
+mod tests;
 mod vm;
 
 use compiler::compile;
@@ -26,9 +27,8 @@ fn file(file_name: &str) {
 }
 
 fn interpret(source: &str) {
-    let script: LoxFunction = compile(source).expect("error parsing");
-    let mut vm = VM::new(script);
-    //vm.debug();
+    let script: LoxFunction = compile(source, false).expect("error parsing");
+    let mut vm = VM::new(script, false, false);
     vm.run();
 }
 

@@ -33,6 +33,8 @@ impl CallFrame {
 
 pub struct VM {
     debug: bool,
+    capture_output: bool,
+    pub output: Vec<String>,
     frames: Vec<CallFrame>,
     stack: Vec<LoxValue>,
     globals: HashMap<String, LoxValue>,
@@ -43,9 +45,11 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(script: LoxFunction) -> VM {
+    pub fn new(script: LoxFunction, debug: bool, capture_output: bool) -> VM {
         let mut vm = VM {
-            debug: false,
+            debug,
+            capture_output,
+            output: Vec::new(),
             frames: Vec::new(),
             stack: Vec::new(),
             globals: HashMap::new(),
@@ -59,10 +63,6 @@ impl VM {
         vm.stack.push(LoxValue::Closure(closure.clone()));
         vm.call(closure, 0);
         vm
-    }
-
-    pub fn debug(&mut self) {
-        self.debug = true;
     }
 
     pub fn run(&mut self) -> u8 {
@@ -322,7 +322,13 @@ impl VM {
                     }
                 }
                 OpCode::Print => {
-                    println!("{}", self.pop());
+                    if self.capture_output {
+                        let formatted = format!("{}", self.pop());
+                        self.output.push(formatted);
+                    } else {
+                        println!("{}", self.pop());
+                    }
+
                 }
                 OpCode::Jump => {
                     let offset = self.get_current_frame_mut().read_short();

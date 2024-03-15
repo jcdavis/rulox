@@ -15,6 +15,7 @@ struct Compiler<'a, 'b> {
     parent: Option<&'b Compiler<'a, 'b>>,
     upvalues: RefCell<Vec<UpValue>>,
     function_upvalue_count: RefCell<usize>,
+    debug: bool,
 }
 
 #[derive(PartialEq)]
@@ -49,9 +50,9 @@ const PRECEDENCE_UNARY: Precedence = 8;
 const PRECEDENCE_CALL: Precedence = 9;
 const PRECEDENCE_PRIMARY: Precedence = 10;
 
-pub fn compile(source: &str) -> Option<LoxFunction> {
+pub fn compile(source: &str, debug: bool) -> Option<LoxFunction> {
     let scanner = scanner::Scanner::new(source);
-    let mut compiler = Compiler::new(scanner, FunctionType::Script);
+    let mut compiler = Compiler::new(scanner, FunctionType::Script, debug);
     compiler.advance();
 
     while !compiler.matches(TokenType::Eof) {
@@ -68,7 +69,7 @@ pub fn compile(source: &str) -> Option<LoxFunction> {
 }
 
 impl<'a, 'b> Compiler<'a, 'b> {
-    fn construct<'c>(scanner: Rc<RefCell<Scanner<'a>>>, function_type: FunctionType, parent: Option<&'c Compiler<'a, 'b>>) -> Compiler<'a, 'c> {
+    fn construct<'c>(scanner: Rc<RefCell<Scanner<'a>>>, function_type: FunctionType, parent: Option<&'c Compiler<'a, 'b>>, debug: bool) -> Compiler<'a, 'c> {
         let mut c = Compiler {
             scanner,
             had_error: RefCell::new(false),
@@ -84,6 +85,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             parent,
             upvalues: RefCell::new(Vec::new()),
             function_upvalue_count: RefCell::new(0),
+            debug,
         };
        /*c.locals.push(Local {
             name: Token {
@@ -96,8 +98,8 @@ impl<'a, 'b> Compiler<'a, 'b> {
         c
     }
 
-    pub fn new(scanner: Scanner<'a>, function_type: FunctionType) -> Compiler<'a, 'b> {
-        Self::construct(Rc::new(RefCell::new(scanner)), function_type, None)
+    pub fn new(scanner: Scanner<'a>, function_type: FunctionType, debug: bool) -> Compiler<'a, 'b> {
+        Self::construct(Rc::new(RefCell::new(scanner)), function_type, None, debug)
     }
 
     pub fn advance(&mut self) {
@@ -190,7 +192,9 @@ impl<'a, 'b> Compiler<'a, 'b> {
     pub fn end_compiler(&mut self) {
         self.emit_opcode(OpCode::Nil);
         self.emit_opcode(OpCode::Return);
-        self.function.chunk.disassemble(self.function.name.as_deref().unwrap_or("code"));
+        if self.debug {
+            self.function.chunk.disassemble(self.function.name.as_deref().unwrap_or("code"));
+        }
     }
 
     pub fn begin_scope(&mut self) {
@@ -421,7 +425,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let name = Some(self.scanner.borrow().previous_token().unwrap().contents.clone());
         let (function, upvalues, upvalue_count) = {
             let rc = Rc::clone(&self.scanner);
-            let mut fn_compiler = Self::construct(rc, function_type, Some(self));
+            let mut fn_compiler = Self::construct(rc, function_type, Some(self), self.debug);
             fn_compiler.function.name = name;
             fn_compiler.begin_scope();
             fn_compiler.consume(TokenType::LeftParen, "Expect '(' after function name.");
