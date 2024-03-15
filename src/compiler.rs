@@ -727,10 +727,16 @@ impl<'a, 'b> Compiler<'a, 'b> {
         if can_assign && self.matches(TokenType::Equal) {
             self.expression();
             self.emit_opcode(OpCode::SetProperty);
+            self.emit_byte(name_id);
+        } else if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_opcode(OpCode::Invoke);
+            self.emit_byte(name_id);
+            self.emit_byte(arg_count);
         } else {
             self.emit_opcode(OpCode::GetProperty);
+            self.emit_byte(name_id);
         }
-        self.emit_byte(name_id);
     }
 
     pub fn call(&mut self) {

@@ -147,4 +147,23 @@ mod tests {
         "#;
         assert_eq!(interpet(src), vec!["\"Enjoy your cup of coffee and chicory\""]);
     }
+
+    #[test]
+    fn test_invoke_bug() {
+        let src = r#"
+        class Oops {
+            init() {
+              fun f() {
+                print "not a method";
+              }
+
+              this.field = f;
+            }
+          }
+
+        var oops = Oops();
+        oops.field();
+        "#;
+        assert_eq!(interpet(src), vec!["\"not a method\""]);
+    }
 }

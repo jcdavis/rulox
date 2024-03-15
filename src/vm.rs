@@ -351,6 +351,16 @@ impl VM {
                         return 1;
                     }
                 },
+                OpCode::Invoke => {
+                    let method = self.get_current_frame_mut().read_constant().clone();
+                    let arg_count = self.get_current_frame_mut().read_byte();
+
+                    if let LoxValue::String(name) = method {
+                        if !self.invoke(name, arg_count) {
+                            return 1;
+                        }
+                    }
+                },
                 OpCode::Closure => {
                     let closure = match self.get_current_frame_mut().read_constant() {
                         LoxValue::Closure(func) => {
@@ -522,6 +532,37 @@ impl VM {
                 self.runtime_error("Can only call functions and classes");
                 false
             },
+        }
+    }
+
+    fn invoke(&mut self, name: Rc<String>, arg_count: u8) -> bool {
+        match self.peek(arg_count as usize).clone() {
+            LoxValue::Instance(inst) => {
+                match inst.fields.borrow().get(&name) {
+                    Some(field) => {
+                        let idx = self.stack.len() - arg_count as usize - 1;
+                        self.stack[idx] = field.clone();
+                        self.call_value(field.clone(), arg_count)
+                    },
+                    None => self.invoke_from_class(&inst.klass, name, arg_count),
+                }
+            },
+            _ => {
+                self.runtime_error("Only instances have methods.");
+                false
+            },
+        }
+    }
+
+    fn invoke_from_class(&mut self, klass: &Rc<LoxClass>, name: Rc<String>, arg_count: u8) -> bool {
+        match klass.methods.borrow().get(&name) {
+            Some(method) => {
+                self.call(Rc::clone(method), arg_count)
+            },
+            None => {
+                self.runtime_error(&format!("Undefined property '{}'", name));
+                false
+            }
         }
     }
 
