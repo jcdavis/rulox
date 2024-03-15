@@ -22,6 +22,7 @@ struct Compiler<'a, 'b> {
 enum FunctionType {
     Function,
     Script,
+    Method,
 }
 
 struct Local {
@@ -70,11 +71,33 @@ pub fn compile(source: &str, debug: bool) -> Option<LoxFunction> {
 
 impl<'a, 'b> Compiler<'a, 'b> {
     fn construct<'c>(scanner: Rc<RefCell<Scanner<'a>>>, function_type: FunctionType, parent: Option<&'c Compiler<'a, 'b>>, debug: bool) -> Compiler<'a, 'c> {
-        let mut c = Compiler {
+        let mut locals = Vec::new();
+        if function_type != FunctionType::Function {
+            locals.push(Local {
+                name: Token {
+                    token_type: TokenType::This,
+                    contents: "this".to_string(),
+                    line: 0,
+                },
+                depth: 0,
+                is_captured: RefCell::new(false),
+            });
+        } else {
+            locals.push(Local {
+                name: Token {
+                    token_type: TokenType::Error,
+                    contents: "".to_string(),
+                    line: 0,
+                },
+                depth: 0,
+                is_captured: RefCell::new(false),
+            });
+        }
+        Compiler {
             scanner,
             had_error: RefCell::new(false),
             panic_mode: RefCell::new(false),
-            locals: Vec::new(),
+            locals,
             scope_depth: 0,
             function: LoxFunction {
                 name: None,
@@ -86,16 +109,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             upvalues: RefCell::new(Vec::new()),
             function_upvalue_count: RefCell::new(0),
             debug,
-        };
-       /*c.locals.push(Local {
-            name: Token {
-                token_type: TokenType::Error,
-                contents: "".to_string(),
-                line: 0,
-            },
-            depth: 0
-        });*/
-        c
+        }
     }
 
     pub fn new(scanner: Scanner<'a>, function_type: FunctionType, debug: bool) -> Compiler<'a, 'b> {
@@ -469,7 +483,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let name = self.scanner.borrow().previous_token().unwrap().contents.clone();
         let constant = self.identifier_constant(name);
 
-        self.function(FunctionType::Function);
+        self.function(FunctionType::Method);
         self.emit_opcode(OpCode::Method);
         self.emit_byte(constant);
     }
@@ -585,6 +599,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
     pub fn variable(&mut self, can_assign: bool) {
         let name = self.scanner.borrow().previous_token().unwrap().contents.clone();
         self.named_variable(name, can_assign);
+    }
+
+    pub fn this(&mut self) {
+        self.variable(false);
     }
 
     pub fn named_variable(&mut self, name: String, can_assign: bool) {
@@ -764,6 +782,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             TokenType::String => self.string(),
             TokenType::Number => self.number(),
             TokenType::Nil | TokenType::True | TokenType::False => self.literal(),
+            TokenType::This => self.this(),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
         }
      }

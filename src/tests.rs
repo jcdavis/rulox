@@ -107,4 +107,22 @@ mod tests {
         "#;
         assert_eq!(interpet(&src), vec!["\"scone with berries and cream\""]);
     }
+
+    #[test]
+    fn test_this() {
+        let  src = r#"
+        class Nested {
+            method() {
+              fun function() {
+                print this;
+              }
+
+              function();
+            }
+          }
+
+          Nested().method();
+        "#;
+        assert_eq!(interpet(src), vec!["Nested instance"])
+    }
 }

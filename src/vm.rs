@@ -85,12 +85,12 @@ impl VM {
                 OpCode::False => self.push(LoxValue::Bool(false)),
                 OpCode::Pop => { self.pop(); },
                 OpCode::GetLocal => {
-                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset + 1;
+                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset;
 
                     self.push(self.stack[slot].clone());
                 },
                 OpCode::SetLocal => {
-                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset + 1;
+                    let slot = self.get_current_frame_mut().read_byte() as usize + self.get_current_frame().stack_offset;
                     self.stack[slot] = self.peek(0).clone();
                 },
                 OpCode::GetGlobal => {
@@ -365,7 +365,7 @@ impl VM {
                                 let is_local = self.get_current_frame_mut().read_byte() != 0;
                                 let idx = self.get_current_frame_mut().read_byte() as usize;
                                 cl.upvalues.borrow_mut().push(if is_local {
-                                    self.capture_upvalue(self.get_current_frame().stack_offset + idx + 1)
+                                    self.capture_upvalue(self.get_current_frame().stack_offset + idx)
                                 } else {
                                     Rc::clone(&self.get_current_frame().closure.upvalues.borrow()[i])
                                 });
@@ -506,6 +506,8 @@ impl VM {
                 true
             },
             LoxValue::BoundMethod(bm) => {
+                let idx = self.stack.len() - arg_count as usize - 1;
+                self.stack[idx] = LoxValue::Instance(Rc::clone(&bm.receiver));
                 self.call(Rc::clone(&bm.method), arg_count);
                 true
             },
