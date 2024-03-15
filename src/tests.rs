@@ -123,6 +123,28 @@ mod tests {
 
           Nested().method();
         "#;
-        assert_eq!(interpet(src), vec!["Nested instance"])
+        assert_eq!(interpet(src), vec!["Nested instance"]);
+    }
+
+    #[test]
+    fn test_init() {
+        let src = r#"
+        class CoffeeMaker {
+            init(coffee) {
+                this.coffee = coffee;
+            }
+
+            brew() {
+                print "Enjoy your cup of " + this.coffee;
+
+                // No reusing the grounds!
+                this.coffee = nil;
+            }
+        }
+
+        var maker = CoffeeMaker("coffee and chicory");
+        maker.brew();
+        "#;
+        assert_eq!(interpet(src), vec!["\"Enjoy your cup of coffee and chicory\""]);
     }
 }

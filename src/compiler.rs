@@ -23,6 +23,7 @@ enum FunctionType {
     Function,
     Script,
     Method,
+    Initializer,
 }
 
 struct Local {
@@ -158,12 +159,6 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.function.chunk.write_byte(byte, self.scanner.borrow().previous_token().expect("Need prev token to emit byte").line)
     }
 
-    pub fn emit_bytes(& mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.function.chunk.write_byte(*byte, self.scanner.borrow().previous_token().expect("Need prev token to emit byte").line);
-        }
-    }
-
     pub fn emit_jump(&mut self, opcode: OpCode) -> usize {
         self.emit_opcode(opcode);
         let offset = self.emit_byte(0xff);
@@ -175,6 +170,16 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.emit_opcode(OpCode::Constant);
         let constant_id = self.make_constant(constant);
         self.emit_byte(constant_id);
+    }
+
+    pub fn emit_return(&mut self) {
+        if self.function_type == FunctionType::Initializer {
+            self.emit_opcode(OpCode::GetLocal);
+            self.emit_byte(0);
+        } else {
+            self.emit_opcode(OpCode::Nil);
+        }
+        self.emit_opcode(OpCode::Return);
     }
 
     pub fn emit_loop(&mut self, loop_start: usize) {
@@ -204,8 +209,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     pub fn end_compiler(&mut self) {
-        self.emit_opcode(OpCode::Nil);
-        self.emit_opcode(OpCode::Return);
+        self.emit_return();
         if self.debug {
             self.function.chunk.disassemble(self.function.name.as_deref().unwrap_or("code"));
         }
@@ -256,15 +260,17 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.patch_jump(else_jump);
     }
 
-    pub fn return_statemnet(&mut self) {
+    pub fn return_statement(&mut self) {
         if self.function_type == FunctionType::Script {
             self.error("Can't return from top-level code.");
         }
 
         if self.matches(TokenType::Semicolon) {
-            self.emit_opcode(OpCode::Nil);
-            self.emit_opcode(OpCode::Return);
+            self.emit_return();
         } else {
+            if self.function_type == FunctionType::Initializer {
+                self.error("Can't return a value from an initializer.");
+            }
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value.");
             self.emit_opcode(OpCode::Return);
@@ -414,7 +420,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
         } else if self.matches(TokenType::If) {
             self.if_statement();
         } else if self.matches(TokenType::Return) {
-            self.return_statemnet();
+            self.return_statement();
         } else if self.matches(TokenType::For) {
             self.for_statement();
         } else if self.matches(TokenType::While) {
@@ -470,7 +476,6 @@ impl<'a, 'b> Compiler<'a, 'b> {
         };
         let constant_id = self.make_constant(LoxValue::Closure(Rc::new(closure)));
         self.emit_byte(constant_id);
-        //self.emit_constant(LoxValue::Closure(Rc::new(closure)));
 
         for uv in upvalues.iter().take(upvalue_count) {
             self.emit_byte(uv.is_local as u8);
@@ -483,7 +488,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let name = self.scanner.borrow().previous_token().unwrap().contents.clone();
         let constant = self.identifier_constant(name);
 
-        self.function(FunctionType::Method);
+        let function_type = if self.scanner.borrow().previous_token().map(|t| t.contents.as_str())  == Some("init") {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
+        self.function(function_type);
         self.emit_opcode(OpCode::Method);
         self.emit_byte(constant);
     }

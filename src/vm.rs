@@ -503,6 +503,12 @@ impl VM {
                 };
                 let idx = self.stack.len() - arg_count as usize - 1;
                 self.stack[idx] = LoxValue::Instance(Rc::new(inst));
+                if let Some(init) = cl.methods.borrow().get(&Rc::new("init".to_string())) {
+                    self.call(Rc::clone(init), arg_count);
+                } else if arg_count != 0 {
+                    self.runtime_error(format!("Expected 0 arguments but got {}", arg_count).as_str());
+                    return false;
+                }
                 true
             },
             LoxValue::BoundMethod(bm) => {
