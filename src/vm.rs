@@ -187,7 +187,7 @@ impl VM {
                             Some(value) => self.push(value.clone()),
                             None => {
                                 // Property not defined, try method bind
-                                if !self.bind_method(inst, name) {
+                                if !self.bind_method(inst.clone(), &inst.klass, name) {
                                     return 1;
                                 }
                             },
@@ -211,6 +211,26 @@ impl VM {
                         }
                     } else {
                         self.runtime_error("Can only set property on instances");
+                        return 1;
+                    }
+                },
+                OpCode::GetSuper => {
+                    if let LoxValue::String(name) = self.get_current_frame_mut().read_constant().clone() {
+                        if let LoxValue::Class(superklass) = self.pop().clone() {
+                            if let LoxValue::Instance(instance) = self.pop() {
+                                if !self.bind_method(instance, &superklass, Rc::clone(&name)) {
+                                    return 1;
+                                }
+                            } else {
+                                self.runtime_error("expecting instance for super call");
+                                return 1;
+                            }
+                        } else {
+                            self.runtime_error("expecting class for super call");
+                            return 1;
+                        }
+                    } else {
+                        self.runtime_error("expecting name for super call to be a string");
                         return 1;
                     }
                 },
@@ -581,9 +601,8 @@ impl VM {
         }
     }
 
-    fn bind_method(&mut self, inst: Rc<LoxInstance>, name: Rc<String>) -> bool {
-        let second_inst = Rc::clone(&inst);
-        let binding = second_inst.klass.methods.borrow();
+    fn bind_method(&mut self, inst: Rc<LoxInstance>, klass: &Rc<LoxClass>, name: Rc<String>) -> bool {
+        let binding = klass.methods.borrow();
         let method = binding.get(&name);
         match method {
             Some(method) => {

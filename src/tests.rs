@@ -166,4 +166,30 @@ mod tests {
         "#;
         assert_eq!(interpet(src), vec!["\"not a method\""]);
     }
+
+    #[test]
+    fn test_super() {
+        let src = r#"
+        class Doughnut {
+            cook() {
+              print "Dunk in the fryer.";
+              this.finish("sprinkles");
+            }
+
+            finish(ingredient) {
+              print "Finish with " + ingredient;
+            }
+          }
+
+          class Cruller < Doughnut {
+            finish(ingredient) {
+              // No sprinkles, always icing.
+              super.finish("icing");
+            }
+          }
+
+          Cruller().cook();
+        "#;
+        assert_eq!(interpet(src), vec!["\"Dunk in the fryer.\"", "\"Finish with icing\""]);
+    }
 }

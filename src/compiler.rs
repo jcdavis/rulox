@@ -16,11 +16,7 @@ struct Compiler<'a, 'b> {
     upvalues: RefCell<Vec<UpValue>>,
     function_upvalue_count: RefCell<usize>,
     debug: bool,
-}
-
-struct ClassCompiler<'a> {
-    parent: Option<&'a ClassCompiler<'a>>,
-    has_superclass: bool,
+    class_compilers: Vec<ClassCompiler>,
 }
 
 #[derive(PartialEq)]
@@ -41,6 +37,11 @@ struct Local {
 struct UpValue {
     idx: u8,
     is_local: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ClassCompiler {
+    has_superclass: bool,
 }
 
 type Precedence = u8;
@@ -115,6 +116,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             upvalues: RefCell::new(Vec::new()),
             function_upvalue_count: RefCell::new(0),
             debug,
+            class_compilers: parent.map(|p| p.class_compilers.clone()).unwrap_or_default(),
         }
     }
 
@@ -308,6 +310,8 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.emit_byte(name_constant);
         self.define_variable(name_constant);
 
+        self.class_compilers.push(ClassCompiler { has_superclass: false});
+
         if self.matches(TokenType::Less) {
             self.consume(TokenType::Identifier, "Expect superclass name.");
             self.variable(false);
@@ -326,6 +330,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
             self.named_variable(class_name.clone(), false);
             self.emit_opcode(OpCode::Inherit);
+            self.class_compilers.last_mut().unwrap().has_superclass = true;
         }
 
         self.named_variable(class_name, false);
@@ -335,6 +340,12 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
         self.emit_opcode(OpCode::Pop); // Class named variable
+
+        let prev = self.class_compilers.pop().unwrap();
+
+        if prev.has_superclass {
+            self.end_scope();
+        }
     }
 
     pub fn fun_declaration(&mut self) {
@@ -637,7 +648,30 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     pub fn this(&mut self) {
-        self.variable(false);
+        if self.class_compilers.is_empty() {
+            self.error("Cant use 'this' outside of a class.");
+        } else {
+            self.variable(false);
+        }
+    }
+
+    pub fn super_(&mut self) {
+        if let Some(cc) = self.class_compilers.last() {
+            if !cc.has_superclass {
+                self.error("Can't use 'super' in a class with no superclass.");
+            }
+        } else {
+            self.error("Can't use 'super' outside of a class.");
+        }
+        self.consume(TokenType::Dot, "Expect '.' after 'super'.");
+        self.consume(TokenType::Identifier, "Expect superclass method name.");
+        let cloned_contents = self.scanner.borrow().previous_token().unwrap().contents.clone();
+        let name = self.identifier_constant(cloned_contents);
+
+        self.named_variable("this".to_string(), false);
+        self.named_variable("super".to_string(), false);
+        self.emit_opcode(OpCode::GetSuper);
+        self.emit_byte(name);
     }
 
     pub fn named_variable(&mut self, name: String, can_assign: bool) {
@@ -824,6 +858,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
             TokenType::Number => self.number(),
             TokenType::Nil | TokenType::True | TokenType::False => self.literal(),
             TokenType::This => self.this(),
+            TokenType::Super => self.super_(),
             rest => self.error(format!("Expect expression, got {:?}", rest).as_str()),
         }
      }
