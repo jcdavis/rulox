@@ -381,6 +381,19 @@ impl VM {
                         }
                     }
                 },
+                OpCode::SuperInvoke => {
+                    if let LoxValue::String(name) = self.get_current_frame_mut().read_constant().clone() {
+                        let arg_count = self.get_current_frame_mut().read_byte();
+                        if let LoxValue::Class(klass) = self.pop().clone() {
+                            if !self.invoke_from_class(&klass, name, arg_count) {
+                                return 1;
+                            }
+                        }
+                    } else {
+                        self.runtime_error("expected string name");
+                        return 1;
+                    }
+                },
                 OpCode::Closure => {
                     let closure = match self.get_current_frame_mut().read_constant() {
                         LoxValue::Closure(func) => {

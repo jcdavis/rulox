@@ -38,6 +38,7 @@ pub enum OpCode {
     Loop,
     Call,
     Invoke,
+    SuperInvoke,
     Closure,
     CloseUpValue,
     Return,
@@ -144,6 +145,7 @@ impl Chunk {
             OpCode::Loop  => self.jump_instruction(as_enum, offset, false),
             OpCode::Call => self.byte_instruction(as_enum, offset),
             OpCode::Invoke => self.invoke_instruction(as_enum, offset),
+            OpCode::SuperInvoke => self.invoke_instruction(as_enum, offset),
             OpCode::Closure => {
                 let constant = self.code[offset + 1];
                 let mut current = offset + 2;

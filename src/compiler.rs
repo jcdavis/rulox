@@ -669,9 +669,17 @@ impl<'a, 'b> Compiler<'a, 'b> {
         let name = self.identifier_constant(cloned_contents);
 
         self.named_variable("this".to_string(), false);
-        self.named_variable("super".to_string(), false);
-        self.emit_opcode(OpCode::GetSuper);
-        self.emit_byte(name);
+        if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.named_variable("super".to_string(), false);
+            self.emit_opcode(OpCode::SuperInvoke);
+            self.emit_byte(name);
+            self.emit_byte(arg_count);
+        } else {
+            self.named_variable("super".to_string(), false);
+            self.emit_opcode(OpCode::GetSuper);
+            self.emit_byte(name);
+        }
     }
 
     pub fn named_variable(&mut self, name: String, can_assign: bool) {
