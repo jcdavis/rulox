@@ -417,6 +417,21 @@ impl VM {
                         }
                     }
                 },
+                OpCode::Inherit => {
+                    if let LoxValue::Class(superklass) = self.peek(1) {
+                        if let LoxValue::Class(subklass) = self.peek(0) {
+                            for (name, method) in superklass.methods.borrow().iter() {
+                                subklass.methods.borrow_mut().insert(Rc::clone(name), Rc::clone(method));
+                            }
+                        } else {
+                            self.runtime_error("Superclass must be a class.");
+                            return 1;
+                        }
+                    } else {
+                        self.runtime_error("Superclass must be a class.");
+                        return 1;
+                    }
+                },
                 OpCode::Method => {
                     let name = self.get_current_frame_mut().read_constant().clone();
 

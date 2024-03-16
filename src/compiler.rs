@@ -18,6 +18,11 @@ struct Compiler<'a, 'b> {
     debug: bool,
 }
 
+struct ClassCompiler<'a> {
+    parent: Option<&'a ClassCompiler<'a>>,
+    has_superclass: bool,
+}
+
 #[derive(PartialEq)]
 enum FunctionType {
     Function,
@@ -302,6 +307,26 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.emit_opcode(OpCode::Class);
         self.emit_byte(name_constant);
         self.define_variable(name_constant);
+
+        if self.matches(TokenType::Less) {
+            self.consume(TokenType::Identifier, "Expect superclass name.");
+            self.variable(false);
+
+            if self.scanner.borrow().previous_token().map(|t| &t.contents) == Some(&class_name) {
+                self.error("A class can't inherit from itself.");
+            }
+
+            self.begin_scope();
+            self.add_local(Token {
+                token_type: TokenType::Super,
+                contents: "super".to_string(),
+                line: 0,
+            });
+            self.define_variable(0);
+
+            self.named_variable(class_name.clone(), false);
+            self.emit_opcode(OpCode::Inherit);
+        }
 
         self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
